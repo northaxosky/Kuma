@@ -19,6 +19,17 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 option(KUMA_BUILD_SANDBOX "Build the sandbox test application" ON)
 option(KUMA_BUILD_TESTS   "Build the unit tests" ON)
 
+# ── Dependencies ─────────────────────────────────────────────────
+include(FetchContent)
+
+FetchContent_Declare(
+    SDL3
+    GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+    GIT_TAG        release-3.2.14
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(SDL3)
+
 # ── Sub-projects ─────────────────────────────────────────────────
 add_subdirectory(engine)
 
