@@ -1,0 +1,25 @@
+# Normalize line endings to LF in the repo, native on checkout
+* text=auto
+
+# Force LF for source code (even on Windows checkout)
+*.cpp text eol=lf
+*.h text eol=lf
+*.hpp text eol=lf
+*.rs text eol=lf
+*.cmake text eol=lf
+CMakeLists.txt text eol=lf
+
+# Force LF for config/scripts
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+*.sh text eol=lf
+
+# Binary files — don't touch these
+*.png binary
+*.jpg binary
+*.bmp binary
+*.ttf binary
+*.spv binary
