@@ -7,6 +7,7 @@ add_library(kuma-engine STATIC)
 target_sources(kuma-engine PRIVATE
     src/core/engine.cpp
     src/platform/window.cpp
+    src/renderer/renderer.cpp
 )
 
 # Public headers: anyone linking kuma-engine gets include/kuma/ on their include path
@@ -17,7 +18,7 @@ target_include_directories(kuma-engine
 )
 
 # SDL3 — PRIVATE because game code should never use SDL directly
-target_link_libraries(kuma-engine PRIVATE SDL3::SDL3)
+target_link_libraries(kuma-engine PRIVATE SDL3::SDL3 Vulkan::Vulkan)
 
 # Compiler warnings — treat warnings seriously from the start
 target_compile_options(kuma-engine PRIVATE

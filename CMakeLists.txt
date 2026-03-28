@@ -30,6 +30,8 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(SDL3)
 
+find_package(Vulkan REQUIRED)
+
 # ── Sub-projects ─────────────────────────────────────────────────
 add_subdirectory(engine)
 

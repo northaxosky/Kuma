@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 
 // Forward-declare SDL types so this header doesn't pull in SDL.h
 // Game code includes kuma/window.h but never needs to know about SDL
@@ -34,6 +35,9 @@ public:
     // Returns false when the user requests quit (clicks X)
     bool poll_events();
 
+    using ResizeCallback = std::function<void(int32_t, int32_t)>;
+    void set_resize_callback(ResizeCallback callback) { resize_callback_ = std::move(callback); }
+
     SDL_Window* native_handle() const { return window_; }
     int32_t width() const { return width_; }
     int32_t height() const { return height_; }
@@ -43,6 +47,7 @@ private:
     SDL_Window* window_ = nullptr;
     int32_t width_ = 0;
     int32_t height_ = 0;
+    ResizeCallback resize_callback_;
 };
 
 } // namespace kuma

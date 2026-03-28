@@ -10,11 +10,13 @@ int main() {
         return 1;
     }
 
-    // The game loop: runs every frame until the window is closed
     kuma::Window& window = kuma::get_window();
+    kuma::Renderer& renderer = kuma::get_renderer();
+
     while (window.poll_events()) {
-        // TODO: update game logic
-        // TODO: render frame
+        if (renderer.begin_frame()) {
+            renderer.end_frame();
+        }
     }
 
     kuma::shutdown();

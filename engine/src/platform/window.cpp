@@ -69,7 +69,9 @@ bool Window::poll_events() {
         case SDL_EVENT_WINDOW_RESIZED:
             width_ = event.window.data1;
             height_ = event.window.data2;
-            std::printf("[Kuma] Window resized: %dx%d\n", width_, height_);
+            if (resize_callback_) {
+                resize_callback_(width_, height_);
+            }
             break;
         }
     }
