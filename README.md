@@ -38,7 +38,7 @@ cmake --build build
 
 ## Project Structure
 
-```
+```txt
 engine/          Engine library (core, platform, renderer)
   include/kuma/  Public API headers
   src/           Implementation
