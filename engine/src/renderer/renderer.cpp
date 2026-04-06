@@ -98,13 +98,13 @@ void RendererImpl::shutdown() {
         vkFreeMemory(device_, texture_.memory, nullptr);
     }
 
-    if (index_buffer_ != VK_NULL_HANDLE) {
-        vkDestroyBuffer(device_, index_buffer_, nullptr);
-        vkFreeMemory(device_, index_buffer_memory_, nullptr);
+    if (mesh_.index_buffer != VK_NULL_HANDLE) {
+        vkDestroyBuffer(device_, mesh_.index_buffer, nullptr);
+        vkFreeMemory(device_, mesh_.index_memory, nullptr);
     }
-    if (vertex_buffer_ != VK_NULL_HANDLE) {
-        vkDestroyBuffer(device_, vertex_buffer_, nullptr);
-        vkFreeMemory(device_, vertex_buffer_memory_, nullptr);
+    if (mesh_.vertex_buffer != VK_NULL_HANDLE) {
+        vkDestroyBuffer(device_, mesh_.vertex_buffer, nullptr);
+        vkFreeMemory(device_, mesh_.vertex_memory, nullptr);
     }
 
     destroy_swapchain();
@@ -183,16 +183,16 @@ bool RendererImpl::begin_frame() {
     scissor.extent = swapchain_extent_;
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    VkBuffer buffers[] = {vertex_buffer_};
+    VkBuffer buffers[] = {mesh_.vertex_buffer};
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(cmd, 0, 1, buffers, offsets);
 
-    vkCmdBindIndexBuffer(cmd, index_buffer_, 0, VK_INDEX_TYPE_UINT16);
+    vkCmdBindIndexBuffer(cmd, mesh_.index_buffer, 0, VK_INDEX_TYPE_UINT16);
 
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
         pipeline_layout_, 0, 1, &descriptor_sets_[current_frame_], 0, nullptr);
 
-    vkCmdDrawIndexed(cmd, index_count_, 1, 0, 0, 0);
+    vkCmdDrawIndexed(cmd, mesh_.index_count, 1, 0, 0, 0);
 
     return true;
 }

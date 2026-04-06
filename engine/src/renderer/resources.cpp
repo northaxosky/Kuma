@@ -35,14 +35,14 @@ bool RendererImpl::create_vertex_buffer() {
     buffer_info.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
     buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    VkResult result = vkCreateBuffer(device_, &buffer_info, nullptr, &vertex_buffer_);
+    VkResult result = vkCreateBuffer(device_, &buffer_info, nullptr, &mesh_.vertex_buffer);
     if (result != VK_SUCCESS) {
         std::printf("[Kuma] Failed to create vertex buffer\n");
         return false;
     }
 
     VkMemoryRequirements mem_reqs;
-    vkGetBufferMemoryRequirements(device_, vertex_buffer_, &mem_reqs);
+    vkGetBufferMemoryRequirements(device_, mesh_.vertex_buffer, &mem_reqs);
 
     VkMemoryAllocateInfo alloc_info{};
     alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
@@ -50,18 +50,18 @@ bool RendererImpl::create_vertex_buffer() {
     alloc_info.memoryTypeIndex = find_memory_type(mem_reqs.memoryTypeBits,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
-    result = vkAllocateMemory(device_, &alloc_info, nullptr, &vertex_buffer_memory_);
+    result = vkAllocateMemory(device_, &alloc_info, nullptr, &mesh_.vertex_memory);
     if (result != VK_SUCCESS) {
         std::printf("[Kuma] Failed to allocate vertex buffer memory\n");
         return false;
     }
 
-    vkBindBufferMemory(device_, vertex_buffer_, vertex_buffer_memory_, 0);
+    vkBindBufferMemory(device_, mesh_.vertex_buffer, mesh_.vertex_memory, 0);
 
     void* data = nullptr;
-    vkMapMemory(device_, vertex_buffer_memory_, 0, buffer_size, 0, &data);
+    vkMapMemory(device_, mesh_.vertex_memory, 0, buffer_size, 0, &data);
     std::memcpy(data, vertices.data(), buffer_size);
-    vkUnmapMemory(device_, vertex_buffer_memory_);
+    vkUnmapMemory(device_, mesh_.vertex_memory);
 
     std::printf("[Kuma] Vertex buffer created (%zu bytes, %zu vertices)\n",
         static_cast<size_t>(buffer_size), vertices.size());
@@ -76,7 +76,7 @@ bool RendererImpl::create_index_buffer() {
         2, 1, 3
     }};
 
-    index_count_ = static_cast<uint32_t>(indices.size());
+    mesh_.index_count = static_cast<uint32_t>(indices.size());
     VkDeviceSize buffer_size = sizeof(uint16_t) * indices.size();
 
     VkBufferCreateInfo buffer_info{};
@@ -85,14 +85,14 @@ bool RendererImpl::create_index_buffer() {
     buffer_info.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
     buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    VkResult result = vkCreateBuffer(device_, &buffer_info, nullptr, &index_buffer_);
+    VkResult result = vkCreateBuffer(device_, &buffer_info, nullptr, &mesh_.index_buffer);
     if (result != VK_SUCCESS) {
         std::printf("[Kuma] Failed to create index buffer\n");
         return false;
     }
 
     VkMemoryRequirements mem_reqs;
-    vkGetBufferMemoryRequirements(device_, index_buffer_, &mem_reqs);
+    vkGetBufferMemoryRequirements(device_, mesh_.index_buffer, &mem_reqs);
 
     VkMemoryAllocateInfo alloc_info{};
     alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
@@ -100,18 +100,18 @@ bool RendererImpl::create_index_buffer() {
     alloc_info.memoryTypeIndex = find_memory_type(mem_reqs.memoryTypeBits,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
-    result = vkAllocateMemory(device_, &alloc_info, nullptr, &index_buffer_memory_);
+    result = vkAllocateMemory(device_, &alloc_info, nullptr, &mesh_.index_memory);
     if (result != VK_SUCCESS) {
         std::printf("[Kuma] Failed to allocate index buffer memory\n");
         return false;
     }
 
-    vkBindBufferMemory(device_, index_buffer_, index_buffer_memory_, 0);
+    vkBindBufferMemory(device_, mesh_.index_buffer, mesh_.index_memory, 0);
 
     void* data = nullptr;
-    vkMapMemory(device_, index_buffer_memory_, 0, buffer_size, 0, &data);
+    vkMapMemory(device_, mesh_.index_memory, 0, buffer_size, 0, &data);
     std::memcpy(data, indices.data(), buffer_size);
-    vkUnmapMemory(device_, index_buffer_memory_);
+    vkUnmapMemory(device_, mesh_.index_memory);
 
     return true;
 }

@@ -40,6 +40,19 @@ struct Texture {
     uint32_t height = 0;
 };
 
+// ── Mesh ────────────────────────────────────────────────────────
+// Bundles the GPU buffers that make up a renderable piece of geometry.
+// Vertex buffer holds per-vertex data (position, UV, etc.).
+// Index buffer holds which vertices form each triangle.
+
+struct Mesh {
+    VkBuffer vertex_buffer = VK_NULL_HANDLE;
+    VkDeviceMemory vertex_memory = VK_NULL_HANDLE;
+    VkBuffer index_buffer = VK_NULL_HANDLE;
+    VkDeviceMemory index_memory = VK_NULL_HANDLE;
+    uint32_t index_count = 0;
+};
+
 // ── File I/O ────────────────────────────────────────────────────
 
 std::vector<char> read_binary_file(const char* path);
@@ -132,16 +145,8 @@ private:
     VkPipelineLayout pipeline_layout_ = VK_NULL_HANDLE;
     VkPipeline graphics_pipeline_ = VK_NULL_HANDLE;
 
-    // Vertex buffer
-    VkBuffer vertex_buffer_ = VK_NULL_HANDLE;
-    VkDeviceMemory vertex_buffer_memory_ = VK_NULL_HANDLE;
-
-    // Index buffer
-    VkBuffer index_buffer_ = VK_NULL_HANDLE;
-    VkDeviceMemory index_buffer_memory_ = VK_NULL_HANDLE;
-    uint32_t index_count_ = 0;
-
-    // Texture
+    // Geometry + texture
+    Mesh mesh_;
     Texture texture_;
 
     // Descriptors
