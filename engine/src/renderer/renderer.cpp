@@ -248,9 +248,7 @@ void RendererImpl::shutdown() {
         vkDestroySemaphore(device_, image_available_semaphores_[i], nullptr);
         vkDestroyFence(device_, in_flight_fences_[i], nullptr);
     }
-    for (auto sem : render_finished_semaphores_) {
-        vkDestroySemaphore(device_, sem, nullptr);
-    }
+    // render_finished_semaphores_ are destroyed inside destroy_swapchain()
 
     vkDestroyCommandPool(device_, command_pool_, nullptr);
 
