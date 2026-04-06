@@ -69,8 +69,9 @@ bool init(const EngineConfig& config) {
 }
 
 void shutdown() {
-    s_resource_manager.shutdown();
-    s_renderer.shutdown();
+    s_renderer.wait_idle();           // GPU finishes all work
+    s_resource_manager.shutdown();    // safe to destroy textures/meshes
+    s_renderer.shutdown();            // destroy Vulkan device last
     s_window.destroy();
     SDL_Quit();
     kuma::log::info("Engine shut down");

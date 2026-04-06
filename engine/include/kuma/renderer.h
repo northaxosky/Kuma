@@ -31,6 +31,9 @@ public:
     bool begin_frame();
     void end_frame();
 
+    // Wait for all GPU work to complete. Call before destroying resources.
+    void wait_idle();
+
     void on_resize(int32_t width, int32_t height);
 
     // Set the active texture and mesh (loaded by ResourceManager).

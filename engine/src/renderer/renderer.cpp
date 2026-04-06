@@ -40,6 +40,10 @@ void Renderer::end_frame() {
     impl_->end_frame();
 }
 
+void Renderer::wait_idle() {
+    vkDeviceWaitIdle(impl_->gpu_context().device);
+}
+
 void Renderer::on_resize(int32_t width, int32_t height) {
     impl_->on_resize(width, height);
 }
