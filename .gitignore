@@ -3,7 +3,9 @@ build/
 out/
 cmake-build-*/
 *.o
+# MSVC linker object files (not .obj 3D models — those live in assets/)
 *.obj
+!assets/**/*.obj
 *.exe
 *.dll
 *.so

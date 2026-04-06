@@ -13,6 +13,11 @@
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "../renderer/stb_image.h"
+
+#define TINYOBJLOADER_DISABLE_FAST_FLOAT
+#define TINYOBJLOADER_IMPLEMENTATION
+#include "tiny_obj_loader.h"
+
 #include "../renderer/renderer_impl.h"
 
 namespace kuma {
@@ -38,14 +43,27 @@ public:
             }
         }
         texture_cache_.clear();
+
+        for (auto& [path, mesh] : mesh_cache_) {
+            if (mesh.vertex_buffer != VK_NULL_HANDLE) {
+                vkDestroyBuffer(gpu_.device, mesh.vertex_buffer, nullptr);
+                vkFreeMemory(gpu_.device, mesh.vertex_memory, nullptr);
+            }
+            if (mesh.index_buffer != VK_NULL_HANDLE) {
+                vkDestroyBuffer(gpu_.device, mesh.index_buffer, nullptr);
+                vkFreeMemory(gpu_.device, mesh.index_memory, nullptr);
+            }
+        }
+        mesh_cache_.clear();
     }
 
     const Texture* load_texture(const char* path);
+    const Mesh* load_mesh(const char* path);
 
     GpuContext gpu_;
 
-    // Cache: path → loaded resource
     std::unordered_map<std::string, Texture> texture_cache_;
+    std::unordered_map<std::string, Mesh> mesh_cache_;
 
 private:
     uint32_t find_memory_type(uint32_t type_filter,
@@ -85,9 +103,7 @@ const Texture* ResourceManager::load_texture(const char* path) {
 }
 
 const Mesh* ResourceManager::load_mesh(const char* path) {
-    // Step 5 — will be implemented when we add OBJ loading
-    (void)path;
-    return nullptr;
+    return impl_->load_mesh(path);
 }
 
 // ── GPU Helpers ─────────────────────────────────────────────────
@@ -357,6 +373,120 @@ const Texture* ResourceManager::Impl::load_texture(const char* path)
 
     // Store in cache and return pointer to the cached copy
     auto [inserted, _] = texture_cache_.emplace(path, texture);
+    return &inserted->second;
+}
+
+// ── Mesh Loading ────────────────────────────────────────────────
+
+const Mesh* ResourceManager::Impl::load_mesh(const char* path) {
+    // Check cache first
+    auto it = mesh_cache_.find(path);
+    if (it != mesh_cache_.end()) {
+        return &it->second;
+    }
+
+    // Parse the OBJ file using tinyobjloader
+    tinyobj::attrib_t attrib;
+    std::vector<tinyobj::shape_t> shapes;
+    std::vector<tinyobj::material_t> materials;
+    std::string warn;
+    std::string err;
+
+    if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, path)) {
+        std::printf("[Kuma] Failed to load mesh: %s (%s)\n", path, err.c_str());
+        return nullptr;
+    }
+
+    if (!warn.empty()) {
+        std::printf("[Kuma] OBJ warning: %s\n", warn.c_str());
+    }
+
+    // Build vertex and index arrays from the parsed data.
+    // OBJ stores positions and UVs in separate arrays, then references
+    // them by index in each face. We need to combine them into our
+    // interleaved Vertex format.
+    std::vector<Vertex> vertices;
+    std::vector<uint16_t> indices;
+
+    for (const auto& shape : shapes) {
+        for (const auto& index : shape.mesh.indices) {
+            Vertex vertex{};
+
+            // Position: attrib.vertices stores [x0, y0, z0, x1, y1, z1, ...]
+            // We take x and y, skip z (we're 2D for now)
+            vertex.position[0] = attrib.vertices[3 * index.vertex_index + 0];
+            vertex.position[1] = attrib.vertices[3 * index.vertex_index + 1];
+
+            // UV: attrib.texcoords stores [u0, v0, u1, v1, ...]
+            if (index.texcoord_index >= 0) {
+                vertex.uv[0] = attrib.texcoords[2 * index.texcoord_index + 0];
+                vertex.uv[1] = attrib.texcoords[2 * index.texcoord_index + 1];
+            }
+
+            indices.push_back(static_cast<uint16_t>(vertices.size()));
+            vertices.push_back(vertex);
+        }
+    }
+
+    // Upload vertex data to GPU
+    Mesh mesh{};
+    mesh.index_count = static_cast<uint32_t>(indices.size());
+
+    VkDeviceSize vertex_size = sizeof(Vertex) * vertices.size();
+    VkDeviceSize index_size = sizeof(uint16_t) * indices.size();
+
+    // ── Vertex buffer ───────────────────────────────────────────
+    VkBufferCreateInfo vb_info{};
+    vb_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    vb_info.size = vertex_size;
+    vb_info.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+    vb_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    vkCreateBuffer(gpu_.device, &vb_info, nullptr, &mesh.vertex_buffer);
+
+    VkMemoryRequirements mem_reqs;
+    vkGetBufferMemoryRequirements(gpu_.device, mesh.vertex_buffer, &mem_reqs);
+
+    VkMemoryAllocateInfo alloc_info{};
+    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc_info.allocationSize = mem_reqs.size;
+    alloc_info.memoryTypeIndex = find_memory_type(mem_reqs.memoryTypeBits,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    vkAllocateMemory(gpu_.device, &alloc_info, nullptr, &mesh.vertex_memory);
+    vkBindBufferMemory(gpu_.device, mesh.vertex_buffer, mesh.vertex_memory, 0);
+
+    void* data;
+    vkMapMemory(gpu_.device, mesh.vertex_memory, 0, vertex_size, 0, &data);
+    std::memcpy(data, vertices.data(), vertex_size);
+    vkUnmapMemory(gpu_.device, mesh.vertex_memory);
+
+    // ── Index buffer ────────────────────────────────────────────
+    VkBufferCreateInfo ib_info{};
+    ib_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    ib_info.size = index_size;
+    ib_info.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+    ib_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    vkCreateBuffer(gpu_.device, &ib_info, nullptr, &mesh.index_buffer);
+
+    vkGetBufferMemoryRequirements(gpu_.device, mesh.index_buffer, &mem_reqs);
+
+    alloc_info.allocationSize = mem_reqs.size;
+    alloc_info.memoryTypeIndex = find_memory_type(mem_reqs.memoryTypeBits,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    vkAllocateMemory(gpu_.device, &alloc_info, nullptr, &mesh.index_memory);
+    vkBindBufferMemory(gpu_.device, mesh.index_buffer, mesh.index_memory, 0);
+
+    vkMapMemory(gpu_.device, mesh.index_memory, 0, index_size, 0, &data);
+    std::memcpy(data, indices.data(), index_size);
+    vkUnmapMemory(gpu_.device, mesh.index_memory);
+
+    std::printf("[Kuma] Mesh loaded: %s (%zu vertices, %u indices)\n",
+        path, vertices.size(), mesh.index_count);
+
+    auto [inserted, _] = mesh_cache_.emplace(path, mesh);
     return &inserted->second;
 }
 

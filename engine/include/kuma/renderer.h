@@ -33,9 +33,9 @@ public:
 
     void on_resize(int32_t width, int32_t height);
 
-    // Set the active texture (loaded by ResourceManager).
-    // The renderer uses this for drawing until a different texture is set.
+    // Set the active texture and mesh (loaded by ResourceManager).
     void set_texture(const void* texture);
+    void set_mesh(const void* mesh);
 
     // Internal — returns opaque GPU context for resource loading.
     // Game code should not call this.

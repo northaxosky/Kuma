@@ -86,8 +86,9 @@ public:
     void on_resize(int32_t width, int32_t height);
     GpuContext gpu_context() const;
 
-    // Set texture loaded by the resource manager (replaces internal texture)
+    // Set resources loaded by the resource manager
     void set_texture(const Texture* texture);
+    void set_mesh(const Mesh* mesh);
 
 private:
     // ── device.cpp ──────────────────────────────────────────────
@@ -112,8 +113,6 @@ private:
     VkShaderModule create_shader_module(const std::vector<char>& code) const;
 
     // ── resources.cpp ───────────────────────────────────────────
-    bool create_vertex_buffer();
-    bool create_index_buffer();
     bool create_descriptor_sets();
     bool create_command_pool();
     bool create_command_buffers();
@@ -159,9 +158,9 @@ private:
     VkPipelineLayout pipeline_layout_ = VK_NULL_HANDLE;
     VkPipeline graphics_pipeline_ = VK_NULL_HANDLE;
 
-    // Geometry + texture
-    Mesh mesh_;
-    const Texture* texture_ = nullptr;   // owned by ResourceManager
+    // Resources (owned by ResourceManager, renderer borrows pointers)
+    const Mesh* mesh_ = nullptr;
+    const Texture* texture_ = nullptr;
 
     // Descriptors
     VkDescriptorSetLayout descriptor_set_layout_ = VK_NULL_HANDLE;

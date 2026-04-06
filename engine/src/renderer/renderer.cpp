@@ -44,6 +44,10 @@ void Renderer::on_resize(int32_t width, int32_t height) {
     impl_->on_resize(width, height);
 }
 
+void Renderer::set_mesh(const void* mesh) {
+    impl_->set_mesh(static_cast<const Mesh*>(mesh));
+}
+
 void Renderer::set_texture(const void* texture) {
     impl_->set_texture(static_cast<const Texture*>(texture));
 }
@@ -70,8 +74,6 @@ bool RendererImpl::init(const RendererConfig& config) {
     if (!create_render_pass())        return false;
     if (!create_graphics_pipeline())  return false;
     if (!create_framebuffers())       return false;
-    if (!create_vertex_buffer())      return false;
-    if (!create_index_buffer())       return false;
     if (!create_command_pool())       return false;
     if (!create_command_buffers())    return false;
     if (!create_sync_objects())       return false;
@@ -96,16 +98,7 @@ void RendererImpl::shutdown() {
         vkDestroyDescriptorPool(device_, descriptor_pool_, nullptr);
     }
 
-    // Texture is owned by ResourceManager — not destroyed here.
-
-    if (mesh_.index_buffer != VK_NULL_HANDLE) {
-        vkDestroyBuffer(device_, mesh_.index_buffer, nullptr);
-        vkFreeMemory(device_, mesh_.index_memory, nullptr);
-    }
-    if (mesh_.vertex_buffer != VK_NULL_HANDLE) {
-        vkDestroyBuffer(device_, mesh_.vertex_buffer, nullptr);
-        vkFreeMemory(device_, mesh_.vertex_memory, nullptr);
-    }
+    // Mesh and texture are owned by ResourceManager — not destroyed here.
 
     destroy_swapchain();
     vkDestroyPipeline(device_, graphics_pipeline_, nullptr);
@@ -183,16 +176,16 @@ bool RendererImpl::begin_frame() {
     scissor.extent = swapchain_extent_;
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    VkBuffer buffers[] = {mesh_.vertex_buffer};
+    VkBuffer buffers[] = {mesh_->vertex_buffer};
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(cmd, 0, 1, buffers, offsets);
 
-    vkCmdBindIndexBuffer(cmd, mesh_.index_buffer, 0, VK_INDEX_TYPE_UINT16);
+    vkCmdBindIndexBuffer(cmd, mesh_->index_buffer, 0, VK_INDEX_TYPE_UINT16);
 
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
         pipeline_layout_, 0, 1, &descriptor_sets_[current_frame_], 0, nullptr);
 
-    vkCmdDrawIndexed(cmd, mesh_.index_count, 1, 0, 0, 0);
+    vkCmdDrawIndexed(cmd, mesh_->index_count, 1, 0, 0, 0);
 
     return true;
 }
@@ -243,6 +236,10 @@ void RendererImpl::on_resize(int32_t width, int32_t height) {
 
 GpuContext RendererImpl::gpu_context() const {
     return GpuContext{device_, physical_device_, command_pool_, graphics_queue_};
+}
+
+void RendererImpl::set_mesh(const Mesh* mesh) {
+    mesh_ = mesh;
 }
 
 void RendererImpl::set_texture(const Texture* texture) {
