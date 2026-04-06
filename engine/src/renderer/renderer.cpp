@@ -10,15 +10,16 @@
 #include <fstream>
 #include <array>
 
+// stb_image: single-header image loading library.
+// STB_IMAGE_IMPLEMENTATION generates the function bodies — must be in exactly one .cpp.
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
 namespace kuma {
 
 // ── File I/O ────────────────────────────────────────────────────
-// Reads a binary file (like compiled SPIR-V shaders) into a byte vector.
-// Returns an empty vector on failure.
 
 static std::vector<char> read_binary_file(const char* path) {
-    // ate = start at the end (so we can get the file size immediately)
-    // binary = don't translate line endings (critical for SPIR-V!)
     std::ifstream file(path, std::ios::ate | std::ios::binary);
 
     if (!file.is_open()) {
@@ -26,11 +27,9 @@ static std::vector<char> read_binary_file(const char* path) {
         return {};
     }
 
-    // tellg() gives us the position (= file size since we opened at the end)
     auto file_size = file.tellg();
     std::vector<char> buffer(static_cast<size_t>(file_size));
 
-    // Seek back to the beginning and read the whole file
     file.seekg(0);
     file.read(buffer.data(), file_size);
 
@@ -38,13 +37,13 @@ static std::vector<char> read_binary_file(const char* path) {
 }
 
 // ── Vertex Data ─────────────────────────────────────────────────
-// This struct must match the shader's input layout exactly.
+// Now uses UV coordinates instead of color for texture mapping.
 //   layout(location = 0) in vec2 in_position  →  position (offset 0)
-//   layout(location = 1) in vec3 in_color     →  color    (offset 8)
+//   layout(location = 1) in vec2 in_uv        →  uv       (offset 8)
 
 struct Vertex {
     float position[2];   // x, y  — clip space coordinates (-1 to +1)
-    float color[3];      // r, g, b
+    float uv[2];         // u, v  — texture coordinates (0 to 1)
 };
 
 // ── Debug Messenger Callback ────────────────────────────────────
@@ -84,9 +83,19 @@ private:
     bool create_framebuffers();
     bool create_graphics_pipeline();
     bool create_vertex_buffer();
+    bool create_index_buffer();
+    bool create_texture();
+    bool create_descriptor_sets();
     bool create_command_pool();
     bool create_command_buffers();
     bool create_sync_objects();
+
+    void copy_buffer_to_image(VkBuffer buffer, VkImage image,
+        uint32_t width, uint32_t height);
+    void transition_image_layout(VkImage image, VkImageLayout old_layout,
+        VkImageLayout new_layout);
+    VkCommandBuffer begin_single_command() const;
+    void end_single_command(VkCommandBuffer cmd) const;
 
     void destroy_swapchain();
     bool recreate_swapchain();
@@ -131,6 +140,22 @@ private:
     // Vertex buffer
     VkBuffer vertex_buffer_ = VK_NULL_HANDLE;
     VkDeviceMemory vertex_buffer_memory_ = VK_NULL_HANDLE;
+
+    // Index buffer
+    VkBuffer index_buffer_ = VK_NULL_HANDLE;
+    VkDeviceMemory index_buffer_memory_ = VK_NULL_HANDLE;
+    uint32_t index_count_ = 0;
+
+    // Texture
+    VkImage texture_image_ = VK_NULL_HANDLE;
+    VkDeviceMemory texture_image_memory_ = VK_NULL_HANDLE;
+    VkImageView texture_image_view_ = VK_NULL_HANDLE;
+    VkSampler texture_sampler_ = VK_NULL_HANDLE;
+
+    // Descriptors — how we bind the texture to the shader
+    VkDescriptorSetLayout descriptor_set_layout_ = VK_NULL_HANDLE;
+    VkDescriptorPool descriptor_pool_ = VK_NULL_HANDLE;
+    std::vector<VkDescriptorSet> descriptor_sets_;  // one per frame-in-flight
 
     // Commands
     VkCommandPool command_pool_ = VK_NULL_HANDLE;
@@ -203,7 +228,10 @@ bool RendererImpl::init(const RendererConfig& config) {
     if (!create_graphics_pipeline())  return false;
     if (!create_framebuffers())       return false;
     if (!create_vertex_buffer())      return false;
+    if (!create_index_buffer())       return false;
     if (!create_command_pool())       return false;
+    if (!create_texture())            return false;
+    if (!create_descriptor_sets())    return false;
     if (!create_command_buffers())    return false;
     if (!create_sync_objects())       return false;
 
@@ -226,6 +254,26 @@ void RendererImpl::shutdown() {
 
     vkDestroyCommandPool(device_, command_pool_, nullptr);
 
+    // Destroy descriptor pool (this also frees all descriptor sets from it)
+    if (descriptor_pool_ != VK_NULL_HANDLE) {
+        vkDestroyDescriptorPool(device_, descriptor_pool_, nullptr);
+    }
+
+    // Destroy texture resources
+    if (texture_sampler_ != VK_NULL_HANDLE)
+        vkDestroySampler(device_, texture_sampler_, nullptr);
+    if (texture_image_view_ != VK_NULL_HANDLE)
+        vkDestroyImageView(device_, texture_image_view_, nullptr);
+    if (texture_image_ != VK_NULL_HANDLE) {
+        vkDestroyImage(device_, texture_image_, nullptr);
+        vkFreeMemory(device_, texture_image_memory_, nullptr);
+    }
+
+    // Destroy buffers
+    if (index_buffer_ != VK_NULL_HANDLE) {
+        vkDestroyBuffer(device_, index_buffer_, nullptr);
+        vkFreeMemory(device_, index_buffer_memory_, nullptr);
+    }
     if (vertex_buffer_ != VK_NULL_HANDLE) {
         vkDestroyBuffer(device_, vertex_buffer_, nullptr);
         vkFreeMemory(device_, vertex_buffer_memory_, nullptr);
@@ -234,6 +282,7 @@ void RendererImpl::shutdown() {
     destroy_swapchain();
     vkDestroyPipeline(device_, graphics_pipeline_, nullptr);
     vkDestroyPipelineLayout(device_, pipeline_layout_, nullptr);
+    vkDestroyDescriptorSetLayout(device_, descriptor_set_layout_, nullptr);
     vkDestroyRenderPass(device_, render_pass_, nullptr);
     vkDestroyDevice(device_, nullptr);
     vkDestroySurfaceKHR(instance_, surface_, nullptr);
@@ -596,8 +645,8 @@ bool RendererImpl::create_render_pass() {
 
 bool RendererImpl::create_graphics_pipeline() {
     // ── 1. Load compiled shaders ────────────────────────────────
-    auto vert_code = read_binary_file("shaders/triangle.vert.spv");
-    auto frag_code = read_binary_file("shaders/triangle.frag.spv");
+    auto vert_code = read_binary_file("shaders/quad.vert.spv");
+    auto frag_code = read_binary_file("shaders/quad.frag.spv");
 
     if (vert_code.empty() || frag_code.empty()) {
         std::printf("[Kuma] Failed to load shader files\n");
@@ -647,11 +696,11 @@ bool RendererImpl::create_graphics_pipeline() {
     attr_descs[0].format = VK_FORMAT_R32G32_SFLOAT;         // vec2
     attr_descs[0].offset = offsetof(Vertex, position);      // 0 bytes in
 
-    // location 1 → color (vec3 = 3 floats)
+    // location 1 → uv (vec2 = 2 floats)
     attr_descs[1].binding = 0;
     attr_descs[1].location = 1;
-    attr_descs[1].format = VK_FORMAT_R32G32B32_SFLOAT;      // vec3
-    attr_descs[1].offset = offsetof(Vertex, color);          // 8 bytes in
+    attr_descs[1].format = VK_FORMAT_R32G32_SFLOAT;          // vec2
+    attr_descs[1].offset = offsetof(Vertex, uv);             // 8 bytes in
 
     VkPipelineVertexInputStateCreateInfo vertex_input{};
     vertex_input.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
@@ -726,12 +775,34 @@ bool RendererImpl::create_graphics_pipeline() {
     color_blending.attachmentCount = 1;
     color_blending.pAttachments = &blend_attachment;
 
-    // ── 9. Pipeline layout ──────────────────────────────────────
-    // Describes uniform buffers, push constants, textures, etc.
-    // Empty for now — our shaders don't use any external data.
+    // ── 9. Descriptor set layout + Pipeline layout ────────────────
+    // The descriptor set layout tells Vulkan what kind of resources
+    // the shader expects. We have one: a combined image sampler (texture).
 
+    VkDescriptorSetLayoutBinding sampler_binding{};
+    sampler_binding.binding = 0;                                    // binding 0 in the shader
+    sampler_binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    sampler_binding.descriptorCount = 1;                            // one texture
+    sampler_binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;      // used in fragment shader
+
+    VkDescriptorSetLayoutCreateInfo layout_binding_info{};
+    layout_binding_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layout_binding_info.bindingCount = 1;
+    layout_binding_info.pBindings = &sampler_binding;
+
+    if (vkCreateDescriptorSetLayout(device_, &layout_binding_info, nullptr,
+            &descriptor_set_layout_) != VK_SUCCESS) {
+        std::printf("[Kuma] Failed to create descriptor set layout\n");
+        vkDestroyShaderModule(device_, vert_module, nullptr);
+        vkDestroyShaderModule(device_, frag_module, nullptr);
+        return false;
+    }
+
+    // Pipeline layout now references our descriptor set layout.
     VkPipelineLayoutCreateInfo layout_info{};
     layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    layout_info.setLayoutCount = 1;
+    layout_info.pSetLayouts = &descriptor_set_layout_;
 
     VkResult result = vkCreatePipelineLayout(device_, &layout_info, nullptr, &pipeline_layout_);
     if (result != VK_SUCCESS) {
@@ -777,28 +848,27 @@ bool RendererImpl::create_graphics_pipeline() {
 }
 
 // ── Vertex Buffer ──────────────────────────────────────────────
-// Upload triangle vertex data to GPU-accessible memory.
+// Upload quad vertex data (position + UV) to GPU-accessible memory.
 
 bool RendererImpl::create_vertex_buffer() {
-    // Our triangle: 3 vertices with position (clip space) and color (RGB)
+    // A quad: 4 corners with position and UV coordinates.
     //
-    //        (0, -0.5) RED
-    //          /\
-    //         /  \
-    //        /    \
-    //       /______\
-    //  (-0.5,0.5)  (0.5,0.5)
-    //   GREEN       BLUE
+    //  v0 (-0.5,-0.5)──────v1 (0.5,-0.5)
+    //   │  uv(0,0)           uv(1,0)  │
+    //   │                              │
+    //   │                              │
+    //  v2 (-0.5, 0.5)──────v3 (0.5, 0.5)
+    //      uv(0,1)           uv(1,1)
 
-    const std::array<Vertex, 3> vertices = {{
-        {{ 0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},   // top center    — red
-        {{ 0.5f,  0.5f}, {0.0f, 0.0f, 1.0f}},   // bottom right  — blue
-        {{-0.5f,  0.5f}, {0.0f, 1.0f, 0.0f}},   // bottom left   — green
+    const std::array<Vertex, 4> vertices = {{
+        {{-0.5f, -0.5f}, {0.0f, 0.0f}},   // top-left
+        {{ 0.5f, -0.5f}, {1.0f, 0.0f}},   // top-right
+        {{-0.5f,  0.5f}, {0.0f, 1.0f}},   // bottom-left
+        {{ 0.5f,  0.5f}, {1.0f, 1.0f}},   // bottom-right
     }};
 
     VkDeviceSize buffer_size = sizeof(Vertex) * vertices.size();
 
-    // Step 1: Create the buffer object (just metadata — no memory yet)
     VkBufferCreateInfo buffer_info{};
     buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     buffer_info.size = buffer_size;
@@ -811,13 +881,9 @@ bool RendererImpl::create_vertex_buffer() {
         return false;
     }
 
-    // Step 2: Find out what memory this buffer needs
     VkMemoryRequirements mem_reqs;
     vkGetBufferMemoryRequirements(device_, vertex_buffer_, &mem_reqs);
 
-    // Step 3: Allocate GPU memory
-    //   HOST_VISIBLE  = CPU can map and write to it
-    //   HOST_COHERENT = writes are immediately visible to GPU (no manual flush)
     VkMemoryAllocateInfo alloc_info{};
     alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     alloc_info.allocationSize = mem_reqs.size;
@@ -830,11 +896,8 @@ bool RendererImpl::create_vertex_buffer() {
         return false;
     }
 
-    // Step 4: Bind the memory to the buffer
     vkBindBufferMemory(device_, vertex_buffer_, vertex_buffer_memory_, 0);
 
-    // Step 5: Copy vertex data from CPU → GPU
-    //   vkMapMemory gives us a CPU-accessible pointer into GPU memory
     void* data = nullptr;
     vkMapMemory(device_, vertex_buffer_memory_, 0, buffer_size, 0, &data);
     std::memcpy(data, vertices.data(), buffer_size);
@@ -842,6 +905,369 @@ bool RendererImpl::create_vertex_buffer() {
 
     std::printf("[Kuma] Vertex buffer created (%zu bytes, %zu vertices)\n",
         static_cast<size_t>(buffer_size), vertices.size());
+    return true;
+}
+
+// ── Index Buffer ───────────────────────────────────────────────
+// Indices tell the GPU which vertices form each triangle.
+// A quad = 2 triangles = 6 indices, but only 4 unique vertices.
+
+bool RendererImpl::create_index_buffer() {
+    const std::array<uint16_t, 6> indices = {{
+        0, 1, 2,    // first triangle  (top-left, top-right, bottom-left)
+        2, 1, 3     // second triangle (bottom-left, top-right, bottom-right)
+    }};
+
+    index_count_ = static_cast<uint32_t>(indices.size());
+    VkDeviceSize buffer_size = sizeof(uint16_t) * indices.size();
+
+    VkBufferCreateInfo buffer_info{};
+    buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buffer_info.size = buffer_size;
+    buffer_info.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+    buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VkResult result = vkCreateBuffer(device_, &buffer_info, nullptr, &index_buffer_);
+    if (result != VK_SUCCESS) {
+        std::printf("[Kuma] Failed to create index buffer\n");
+        return false;
+    }
+
+    VkMemoryRequirements mem_reqs;
+    vkGetBufferMemoryRequirements(device_, index_buffer_, &mem_reqs);
+
+    VkMemoryAllocateInfo alloc_info{};
+    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc_info.allocationSize = mem_reqs.size;
+    alloc_info.memoryTypeIndex = find_memory_type(mem_reqs.memoryTypeBits,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    result = vkAllocateMemory(device_, &alloc_info, nullptr, &index_buffer_memory_);
+    if (result != VK_SUCCESS) {
+        std::printf("[Kuma] Failed to allocate index buffer memory\n");
+        return false;
+    }
+
+    vkBindBufferMemory(device_, index_buffer_, index_buffer_memory_, 0);
+
+    void* data = nullptr;
+    vkMapMemory(device_, index_buffer_memory_, 0, buffer_size, 0, &data);
+    std::memcpy(data, indices.data(), buffer_size);
+    vkUnmapMemory(device_, index_buffer_memory_);
+
+    return true;
+}
+
+// ── Single-use Command Helpers ─────────────────────────────────
+// Some operations (like copying data to GPU images) need a one-shot
+// command buffer. These helpers create one, let you record, then submit
+// and wait for completion.
+
+VkCommandBuffer RendererImpl::begin_single_command() const {
+    VkCommandBufferAllocateInfo alloc_info{};
+    alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    alloc_info.commandPool = command_pool_;
+    alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    alloc_info.commandBufferCount = 1;
+
+    VkCommandBuffer cmd;
+    vkAllocateCommandBuffers(device_, &alloc_info, &cmd);
+
+    VkCommandBufferBeginInfo begin_info{};
+    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmd, &begin_info);
+
+    return cmd;
+}
+
+void RendererImpl::end_single_command(VkCommandBuffer cmd) const {
+    vkEndCommandBuffer(cmd);
+
+    VkSubmitInfo submit_info{};
+    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info.commandBufferCount = 1;
+    submit_info.pCommandBuffers = &cmd;
+
+    vkQueueSubmit(graphics_queue_, 1, &submit_info, VK_NULL_HANDLE);
+    vkQueueWaitIdle(graphics_queue_);
+
+    vkFreeCommandBuffers(device_, command_pool_, 1, &cmd);
+}
+
+// ── Image Layout Transitions ───────────────────────────────────
+// GPU images must be in the right "layout" for each operation.
+// This function inserts a pipeline barrier to transition between layouts.
+
+void RendererImpl::transition_image_layout(VkImage image,
+    VkImageLayout old_layout, VkImageLayout new_layout)
+{
+    VkCommandBuffer cmd = begin_single_command();
+
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout = old_layout;
+    barrier.newLayout = new_layout;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = image;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+
+    VkPipelineStageFlags src_stage;
+    VkPipelineStageFlags dst_stage;
+
+    if (old_layout == VK_IMAGE_LAYOUT_UNDEFINED &&
+        new_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+        // Transition for copying data into the image
+        barrier.srcAccessMask = 0;
+        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        src_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        dst_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    } else if (old_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL &&
+               new_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+        // Transition for reading in a shader (after copy is done)
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        src_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        dst_stage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    } else {
+        std::printf("[Kuma] Unsupported layout transition\n");
+        end_single_command(cmd);
+        return;
+    }
+
+    vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0,
+        0, nullptr, 0, nullptr, 1, &barrier);
+
+    end_single_command(cmd);
+}
+
+// ── Buffer-to-Image Copy ───────────────────────────────────────
+
+void RendererImpl::copy_buffer_to_image(VkBuffer buffer, VkImage image,
+    uint32_t width, uint32_t height)
+{
+    VkCommandBuffer cmd = begin_single_command();
+
+    VkBufferImageCopy region{};
+    region.bufferOffset = 0;
+    region.bufferRowLength = 0;    // tightly packed
+    region.bufferImageHeight = 0;  // tightly packed
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.mipLevel = 0;
+    region.imageSubresource.baseArrayLayer = 0;
+    region.imageSubresource.layerCount = 1;
+    region.imageOffset = {0, 0, 0};
+    region.imageExtent = {width, height, 1};
+
+    vkCmdCopyBufferToImage(cmd, buffer, image,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+    end_single_command(cmd);
+}
+
+// ── Texture ────────────────────────────────────────────────────
+// Creates a checkerboard texture procedurally: no external file needed.
+// This demonstrates the full texture pipeline:
+//   pixels → staging buffer → GPU image → image view → sampler
+
+bool RendererImpl::create_texture() {
+    // Generate a checkerboard pattern (8x8 tiles on a 64x64 image)
+    constexpr uint32_t TEX_WIDTH = 64;
+    constexpr uint32_t TEX_HEIGHT = 64;
+    constexpr uint32_t TILE_SIZE = 8;
+
+    std::array<uint8_t, TEX_WIDTH * TEX_HEIGHT * 4> pixels;
+    for (uint32_t y = 0; y < TEX_HEIGHT; y++) {
+        for (uint32_t x = 0; x < TEX_WIDTH; x++) {
+            uint32_t i = (y * TEX_WIDTH + x) * 4;
+            bool white = ((x / TILE_SIZE) + (y / TILE_SIZE)) % 2 == 0;
+            pixels[i + 0] = white ? 255 : 50;   // R
+            pixels[i + 1] = white ? 255 : 50;   // G
+            pixels[i + 2] = white ? 255 : 50;   // B
+            pixels[i + 3] = 255;                 // A (fully opaque)
+        }
+    }
+
+    VkDeviceSize image_size = TEX_WIDTH * TEX_HEIGHT * 4;
+
+    // ── Staging buffer (CPU-visible temp storage) ───────────────
+    VkBuffer staging_buffer;
+    VkDeviceMemory staging_memory;
+
+    VkBufferCreateInfo staging_info{};
+    staging_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    staging_info.size = image_size;
+    staging_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    staging_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    vkCreateBuffer(device_, &staging_info, nullptr, &staging_buffer);
+
+    VkMemoryRequirements mem_reqs;
+    vkGetBufferMemoryRequirements(device_, staging_buffer, &mem_reqs);
+
+    VkMemoryAllocateInfo alloc_info{};
+    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc_info.allocationSize = mem_reqs.size;
+    alloc_info.memoryTypeIndex = find_memory_type(mem_reqs.memoryTypeBits,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    vkAllocateMemory(device_, &alloc_info, nullptr, &staging_memory);
+    vkBindBufferMemory(device_, staging_buffer, staging_memory, 0);
+
+    // Copy pixel data into the staging buffer
+    void* data;
+    vkMapMemory(device_, staging_memory, 0, image_size, 0, &data);
+    std::memcpy(data, pixels.data(), image_size);
+    vkUnmapMemory(device_, staging_memory);
+
+    // ── GPU image (DEVICE_LOCAL — fast VRAM) ────────────────────
+    VkImageCreateInfo img_info{};
+    img_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    img_info.imageType = VK_IMAGE_TYPE_2D;
+    img_info.extent = {TEX_WIDTH, TEX_HEIGHT, 1};
+    img_info.mipLevels = 1;
+    img_info.arrayLayers = 1;
+    img_info.format = VK_FORMAT_R8G8B8A8_SRGB;
+    img_info.tiling = VK_IMAGE_TILING_OPTIMAL;       // GPU-optimized layout
+    img_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    img_info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    img_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    img_info.samples = VK_SAMPLE_COUNT_1_BIT;
+
+    if (vkCreateImage(device_, &img_info, nullptr, &texture_image_) != VK_SUCCESS) {
+        std::printf("[Kuma] Failed to create texture image\n");
+        vkDestroyBuffer(device_, staging_buffer, nullptr);
+        vkFreeMemory(device_, staging_memory, nullptr);
+        return false;
+    }
+
+    vkGetImageMemoryRequirements(device_, texture_image_, &mem_reqs);
+
+    alloc_info.allocationSize = mem_reqs.size;
+    alloc_info.memoryTypeIndex = find_memory_type(mem_reqs.memoryTypeBits,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    vkAllocateMemory(device_, &alloc_info, nullptr, &texture_image_memory_);
+    vkBindImageMemory(device_, texture_image_, texture_image_memory_, 0);
+
+    // ── Transfer: staging buffer → GPU image ────────────────────
+    transition_image_layout(texture_image_,
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+    copy_buffer_to_image(staging_buffer, texture_image_, TEX_WIDTH, TEX_HEIGHT);
+
+    transition_image_layout(texture_image_,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+    // Staging buffer is no longer needed
+    vkDestroyBuffer(device_, staging_buffer, nullptr);
+    vkFreeMemory(device_, staging_memory, nullptr);
+
+    // ── Image view ──────────────────────────────────────────────
+    VkImageViewCreateInfo view_info{};
+    view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    view_info.image = texture_image_;
+    view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    view_info.format = VK_FORMAT_R8G8B8A8_SRGB;
+    view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    view_info.subresourceRange.baseMipLevel = 0;
+    view_info.subresourceRange.levelCount = 1;
+    view_info.subresourceRange.baseArrayLayer = 0;
+    view_info.subresourceRange.layerCount = 1;
+
+    if (vkCreateImageView(device_, &view_info, nullptr, &texture_image_view_) != VK_SUCCESS) {
+        std::printf("[Kuma] Failed to create texture image view\n");
+        return false;
+    }
+
+    // ── Sampler (filtering + wrapping rules) ────────────────────
+    VkSamplerCreateInfo sampler_info{};
+    sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    sampler_info.magFilter = VK_FILTER_NEAREST;     // when texture is magnified: sharp pixels
+    sampler_info.minFilter = VK_FILTER_NEAREST;     // when texture is minified: sharp pixels
+    sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;  // tile horizontally
+    sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;  // tile vertically
+    sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampler_info.anisotropyEnable = VK_FALSE;
+    sampler_info.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+    sampler_info.unnormalizedCoordinates = VK_FALSE;   // use 0.0–1.0 UV range
+    sampler_info.compareEnable = VK_FALSE;
+    sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+
+    if (vkCreateSampler(device_, &sampler_info, nullptr, &texture_sampler_) != VK_SUCCESS) {
+        std::printf("[Kuma] Failed to create texture sampler\n");
+        return false;
+    }
+
+    std::printf("[Kuma] Texture created (%ux%u checkerboard)\n", TEX_WIDTH, TEX_HEIGHT);
+    return true;
+}
+
+// ── Descriptor Sets ────────────────────────────────────────────
+// Descriptor sets bind actual resources (our texture) to shader bindings.
+// We need one per frame-in-flight so the GPU can read from one while
+// we update another.
+
+bool RendererImpl::create_descriptor_sets() {
+    // ── Pool ────────────────────────────────────────────────────
+    // A pool allocates descriptor sets (like a command pool for command buffers).
+    VkDescriptorPoolSize pool_size{};
+    pool_size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    pool_size.descriptorCount = MAX_FRAMES_IN_FLIGHT;
+
+    VkDescriptorPoolCreateInfo pool_info{};
+    pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    pool_info.poolSizeCount = 1;
+    pool_info.pPoolSizes = &pool_size;
+    pool_info.maxSets = MAX_FRAMES_IN_FLIGHT;
+
+    if (vkCreateDescriptorPool(device_, &pool_info, nullptr, &descriptor_pool_) != VK_SUCCESS) {
+        std::printf("[Kuma] Failed to create descriptor pool\n");
+        return false;
+    }
+
+    // ── Allocate sets ───────────────────────────────────────────
+    std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, descriptor_set_layout_);
+
+    VkDescriptorSetAllocateInfo set_alloc_info{};
+    set_alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    set_alloc_info.descriptorPool = descriptor_pool_;
+    set_alloc_info.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
+    set_alloc_info.pSetLayouts = layouts.data();
+
+    descriptor_sets_.resize(MAX_FRAMES_IN_FLIGHT);
+    if (vkAllocateDescriptorSets(device_, &set_alloc_info, descriptor_sets_.data()) != VK_SUCCESS) {
+        std::printf("[Kuma] Failed to allocate descriptor sets\n");
+        return false;
+    }
+
+    // ── Write (point each set to our texture + sampler) ─────────
+    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        VkDescriptorImageInfo image_info{};
+        image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        image_info.imageView = texture_image_view_;
+        image_info.sampler = texture_sampler_;
+
+        VkWriteDescriptorSet write{};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = descriptor_sets_[i];
+        write.dstBinding = 0;
+        write.dstArrayElement = 0;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        write.descriptorCount = 1;
+        write.pImageInfo = &image_info;
+
+        vkUpdateDescriptorSets(device_, 1, &write, 0, nullptr);
+    }
+
+    std::printf("[Kuma] Descriptor sets created\n");
     return true;
 }
 
@@ -1004,13 +1430,20 @@ bool RendererImpl::begin_frame() {
     scissor.extent = swapchain_extent_;
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    // Bind the vertex buffer — "here's the triangle data"
+    // Bind the vertex buffer — "here's the quad vertex data"
     VkBuffer buffers[] = {vertex_buffer_};
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(cmd, 0, 1, buffers, offsets);
 
-    // Draw! 3 vertices, 1 instance, starting at vertex 0, instance 0.
-    vkCmdDraw(cmd, 3, 1, 0, 0);
+    // Bind the index buffer — "here's which vertices form each triangle"
+    vkCmdBindIndexBuffer(cmd, index_buffer_, 0, VK_INDEX_TYPE_UINT16);
+
+    // Bind the descriptor set — "here's the texture for the shader"
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+        pipeline_layout_, 0, 1, &descriptor_sets_[current_frame_], 0, nullptr);
+
+    // Draw! 6 indices (2 triangles), 1 instance.
+    vkCmdDrawIndexed(cmd, index_count_, 1, 0, 0, 0);
 
     return true;
 }
