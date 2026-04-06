@@ -6,6 +6,7 @@ namespace kuma {
 
 static Window s_window;
 static Renderer s_renderer;
+static ResourceManager s_resource_manager;
 
 bool init(const EngineConfig& config) {
     std::printf("[Kuma] Initializing engine: %s\n", config.app_name);
@@ -41,10 +42,18 @@ bool init(const EngineConfig& config) {
         return false;
     }
 
+    if (!s_resource_manager.init()) {
+        s_renderer.shutdown();
+        s_window.destroy();
+        SDL_Quit();
+        return false;
+    }
+
     return true;
 }
 
 void shutdown() {
+    s_resource_manager.shutdown();
     s_renderer.shutdown();
     s_window.destroy();
     SDL_Quit();
@@ -57,6 +66,10 @@ Window& get_window() {
 
 Renderer& get_renderer() {
     return s_renderer;
+}
+
+ResourceManager& get_resource_manager() {
+    return s_resource_manager;
 }
 
 } // namespace kuma

@@ -5,6 +5,7 @@
 
 #include <kuma/window.h>
 #include <kuma/renderer.h>
+#include <kuma/resource_manager.h>
 
 namespace kuma {
 
@@ -24,5 +25,6 @@ void shutdown();
 // Access engine subsystems (valid between init and shutdown)
 Window& get_window();
 Renderer& get_renderer();
+ResourceManager& get_resource_manager();
 
 } // namespace kuma
