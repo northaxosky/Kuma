@@ -27,6 +27,19 @@ struct Vertex {
     float uv[2];         // u, v  — texture coordinates (0 to 1)
 };
 
+// ── Texture ─────────────────────────────────────────────────────
+// Bundles all Vulkan objects that make up a usable texture.
+// Created together, destroyed together — a single unit of GPU state.
+
+struct Texture {
+    VkImage image = VK_NULL_HANDLE;
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    VkImageView view = VK_NULL_HANDLE;
+    VkSampler sampler = VK_NULL_HANDLE;
+    uint32_t width = 0;
+    uint32_t height = 0;
+};
+
 // ── File I/O ────────────────────────────────────────────────────
 
 std::vector<char> read_binary_file(const char* path);
@@ -129,10 +142,7 @@ private:
     uint32_t index_count_ = 0;
 
     // Texture
-    VkImage texture_image_ = VK_NULL_HANDLE;
-    VkDeviceMemory texture_image_memory_ = VK_NULL_HANDLE;
-    VkImageView texture_image_view_ = VK_NULL_HANDLE;
-    VkSampler texture_sampler_ = VK_NULL_HANDLE;
+    Texture texture_;
 
     // Descriptors
     VkDescriptorSetLayout descriptor_set_layout_ = VK_NULL_HANDLE;

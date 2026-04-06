@@ -89,13 +89,13 @@ void RendererImpl::shutdown() {
         vkDestroyDescriptorPool(device_, descriptor_pool_, nullptr);
     }
 
-    if (texture_sampler_ != VK_NULL_HANDLE)
-        vkDestroySampler(device_, texture_sampler_, nullptr);
-    if (texture_image_view_ != VK_NULL_HANDLE)
-        vkDestroyImageView(device_, texture_image_view_, nullptr);
-    if (texture_image_ != VK_NULL_HANDLE) {
-        vkDestroyImage(device_, texture_image_, nullptr);
-        vkFreeMemory(device_, texture_image_memory_, nullptr);
+    if (texture_.sampler != VK_NULL_HANDLE)
+        vkDestroySampler(device_, texture_.sampler, nullptr);
+    if (texture_.view != VK_NULL_HANDLE)
+        vkDestroyImageView(device_, texture_.view, nullptr);
+    if (texture_.image != VK_NULL_HANDLE) {
+        vkDestroyImage(device_, texture_.image, nullptr);
+        vkFreeMemory(device_, texture_.memory, nullptr);
     }
 
     if (index_buffer_ != VK_NULL_HANDLE) {

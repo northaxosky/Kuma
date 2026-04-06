@@ -285,31 +285,31 @@ bool RendererImpl::create_texture() {
     img_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     img_info.samples = VK_SAMPLE_COUNT_1_BIT;
 
-    if (vkCreateImage(device_, &img_info, nullptr, &texture_image_) != VK_SUCCESS) {
+    if (vkCreateImage(device_, &img_info, nullptr, &texture_.image) != VK_SUCCESS) {
         std::printf("[Kuma] Failed to create texture image\n");
         vkDestroyBuffer(device_, staging_buffer, nullptr);
         vkFreeMemory(device_, staging_memory, nullptr);
         return false;
     }
 
-    vkGetImageMemoryRequirements(device_, texture_image_, &mem_reqs);
+    vkGetImageMemoryRequirements(device_, texture_.image, &mem_reqs);
 
     alloc_info.allocationSize = mem_reqs.size;
     alloc_info.memoryTypeIndex = find_memory_type(mem_reqs.memoryTypeBits,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-    vkAllocateMemory(device_, &alloc_info, nullptr, &texture_image_memory_);
-    vkBindImageMemory(device_, texture_image_, texture_image_memory_, 0);
+    vkAllocateMemory(device_, &alloc_info, nullptr, &texture_.memory);
+    vkBindImageMemory(device_, texture_.image, texture_.memory, 0);
 
     // Transfer
-    transition_image_layout(texture_image_,
+    transition_image_layout(texture_.image,
         VK_IMAGE_LAYOUT_UNDEFINED,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
-    copy_buffer_to_image(staging_buffer, texture_image_,
+    copy_buffer_to_image(staging_buffer, texture_.image,
         static_cast<uint32_t>(tex_width), static_cast<uint32_t>(tex_height));
 
-    transition_image_layout(texture_image_,
+    transition_image_layout(texture_.image,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
@@ -319,7 +319,7 @@ bool RendererImpl::create_texture() {
     // Image view
     VkImageViewCreateInfo view_info{};
     view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    view_info.image = texture_image_;
+    view_info.image = texture_.image;
     view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
     view_info.format = VK_FORMAT_R8G8B8A8_SRGB;
     view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -328,7 +328,7 @@ bool RendererImpl::create_texture() {
     view_info.subresourceRange.baseArrayLayer = 0;
     view_info.subresourceRange.layerCount = 1;
 
-    if (vkCreateImageView(device_, &view_info, nullptr, &texture_image_view_) != VK_SUCCESS) {
+    if (vkCreateImageView(device_, &view_info, nullptr, &texture_.view) != VK_SUCCESS) {
         std::printf("[Kuma] Failed to create texture image view\n");
         return false;
     }
@@ -347,12 +347,15 @@ bool RendererImpl::create_texture() {
     sampler_info.compareEnable = VK_FALSE;
     sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
 
-    if (vkCreateSampler(device_, &sampler_info, nullptr, &texture_sampler_) != VK_SUCCESS) {
+    if (vkCreateSampler(device_, &sampler_info, nullptr, &texture_.sampler) != VK_SUCCESS) {
         std::printf("[Kuma] Failed to create texture sampler\n");
         return false;
     }
 
-    std::printf("[Kuma] Texture loaded (%dx%d)\n", tex_width, tex_height);
+    texture_.width = static_cast<uint32_t>(tex_width);
+    texture_.height = static_cast<uint32_t>(tex_height);
+
+    std::printf("[Kuma] Texture loaded (%ux%u)\n", texture_.width, texture_.height);
     return true;
 }
 
@@ -391,8 +394,8 @@ bool RendererImpl::create_descriptor_sets() {
     for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         VkDescriptorImageInfo image_info{};
         image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        image_info.imageView = texture_image_view_;
-        image_info.sampler = texture_sampler_;
+        image_info.imageView = texture_.view;
+        image_info.sampler = texture_.sampler;
 
         VkWriteDescriptorSet write{};
         write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
