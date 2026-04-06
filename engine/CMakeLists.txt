@@ -38,6 +38,8 @@ set(SHADER_OUTPUT_DIR ${CMAKE_BINARY_DIR}/shaders)
 set(SHADER_SOURCES
     ${SHADER_SOURCE_DIR}/triangle.vert
     ${SHADER_SOURCE_DIR}/triangle.frag
+    ${SHADER_SOURCE_DIR}/quad.vert
+    ${SHADER_SOURCE_DIR}/quad.frag
 )
 
 # For each shader, add a custom command that compiles it to SPIR-V.
