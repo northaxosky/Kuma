@@ -12,6 +12,7 @@ target_sources(kuma-engine PRIVATE
     src/renderer/swapchain.cpp
     src/renderer/pipeline.cpp
     src/renderer/resources.cpp
+    src/resources/resource_manager.cpp
 )
 
 # Public headers: anyone linking kuma-engine gets include/kuma/ on their include path

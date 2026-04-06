@@ -3,10 +3,6 @@
 // and GPU memory helpers.
 
 #include "renderer_impl.h"
-
-// stb_image: single-header image loading library.
-// STB_IMAGE_IMPLEMENTATION generates the function bodies — must be in exactly one .cpp.
-#define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
 namespace kuma {
