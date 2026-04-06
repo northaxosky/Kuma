@@ -1,0 +1,23 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Sandbox (Debug)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/bin/Debug/sandbox.exe",
+            "args": [],
+            "cwd": "${workspaceFolder}/build/bin/Debug",
+            "preLaunchTask": "build-debug"
+        },
+        {
+            "name": "Sandbox (Release)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/bin/Release/sandbox.exe",
+            "args": [],
+            "cwd": "${workspaceFolder}/build/bin/Release",
+            "preLaunchTask": "build-release"
+        }
+    ]
+}
