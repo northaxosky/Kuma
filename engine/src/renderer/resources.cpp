@@ -14,11 +14,17 @@ namespace kuma {
 // ── Vertex Buffer ──────────────────────────────────────────────
 
 bool RendererImpl::create_vertex_buffer() {
+    // Correct for aspect ratio so the quad appears square on screen.
+    // Without this, a 1:1 quad in clip space stretches to 16:9 on a widescreen window.
+    float aspect = static_cast<float>(width_) / static_cast<float>(height_);
+    float half_w = 0.5f / aspect;   // shrink X to compensate
+    float half_h = 0.5f;
+
     const std::array<Vertex, 4> vertices = {{
-        {{-0.5f, -0.5f}, {0.0f, 0.0f}},   // top-left
-        {{ 0.5f, -0.5f}, {1.0f, 0.0f}},   // top-right
-        {{-0.5f,  0.5f}, {0.0f, 1.0f}},   // bottom-left
-        {{ 0.5f,  0.5f}, {1.0f, 1.0f}},   // bottom-right
+        {{-half_w, -half_h}, {0.0f, 0.0f}},   // top-left
+        {{ half_w, -half_h}, {1.0f, 0.0f}},   // top-right
+        {{-half_w,  half_h}, {0.0f, 1.0f}},   // bottom-left
+        {{ half_w,  half_h}, {1.0f, 1.0f}},   // bottom-right
     }};
 
     VkDeviceSize buffer_size = sizeof(Vertex) * vertices.size();
