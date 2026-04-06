@@ -3,6 +3,7 @@
 // Owns a GPU context (device, queue, etc.) to upload data to the GPU.
 
 #include <kuma/resource_manager.h>
+#include <kuma/log.h>
 #include <vulkan/vulkan.h>
 #include <cstdio>
 #include <cstring>
@@ -125,7 +126,7 @@ uint32_t ResourceManager::Impl::find_memory_type(
         }
     }
 
-    std::printf("[Kuma] Failed to find suitable memory type\n");
+    kuma::log::error("Failed to find suitable memory type");
     return 0;
 }
 
@@ -196,7 +197,7 @@ void ResourceManager::Impl::transition_image_layout(VkImage image, VkImageLayout
         src_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
         dst_stage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
     } else {
-        std::printf("[Kuma] Unsupported layout transition\n");
+        kuma::log::error("Unsupported layout transition");
         end_single_command(cmd);
         return;
     }
@@ -246,7 +247,7 @@ const Texture* ResourceManager::Impl::load_texture(const char* path)
     stbi_uc* pixels = stbi_load(path, &tex_width, &tex_height, &tex_channels, STBI_rgb_alpha);
 
     if (!pixels) {
-        std::printf("[Kuma] Failed to load texture: %s (%s)\n", path, stbi_failure_reason());
+        kuma::log::error("Failed to load texture: %s (%s)", path, stbi_failure_reason());
         return nullptr;
     }
 
@@ -300,7 +301,7 @@ const Texture* ResourceManager::Impl::load_texture(const char* path)
     img_info.samples = VK_SAMPLE_COUNT_1_BIT;
 
     if (vkCreateImage(gpu_.device, &img_info, nullptr, &texture.image) != VK_SUCCESS) {
-        std::printf("[Kuma] Failed to create texture image\n");
+        kuma::log::error("Failed to create texture image");
         vkDestroyBuffer(gpu_.device, staging_buffer, nullptr);
         vkFreeMemory(gpu_.device, staging_memory, nullptr);
         return nullptr;
@@ -343,7 +344,7 @@ const Texture* ResourceManager::Impl::load_texture(const char* path)
     view_info.subresourceRange.layerCount = 1;
 
     if (vkCreateImageView(gpu_.device, &view_info, nullptr, &texture.view) != VK_SUCCESS) {
-        std::printf("[Kuma] Failed to create texture image view\n");
+        kuma::log::error("Failed to create texture image view");
         return nullptr;
     }
 
@@ -362,14 +363,14 @@ const Texture* ResourceManager::Impl::load_texture(const char* path)
     sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
 
     if (vkCreateSampler(gpu_.device, &sampler_info, nullptr, &texture.sampler) != VK_SUCCESS) {
-        std::printf("[Kuma] Failed to create texture sampler\n");
+        kuma::log::error("Failed to create texture sampler");
         return nullptr;
     }
 
     texture.width = static_cast<uint32_t>(tex_width);
     texture.height = static_cast<uint32_t>(tex_height);
 
-    std::printf("[Kuma] Texture loaded: %s (%ux%u)\n", path, texture.width, texture.height);
+    kuma::log::info("Texture loaded: %s (%ux%u)", path, texture.width, texture.height);
 
     // Store in cache and return pointer to the cached copy
     auto [inserted, _] = texture_cache_.emplace(path, texture);
@@ -393,12 +394,12 @@ const Mesh* ResourceManager::Impl::load_mesh(const char* path) {
     std::string err;
 
     if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, path)) {
-        std::printf("[Kuma] Failed to load mesh: %s (%s)\n", path, err.c_str());
+        kuma::log::error("Failed to load mesh: %s (%s)", path, err.c_str());
         return nullptr;
     }
 
     if (!warn.empty()) {
-        std::printf("[Kuma] OBJ warning: %s\n", warn.c_str());
+        kuma::log::warn("OBJ warning: %s", warn.c_str());
     }
 
     // Build vertex and index arrays from the parsed data.
@@ -483,7 +484,7 @@ const Mesh* ResourceManager::Impl::load_mesh(const char* path) {
     std::memcpy(data, indices.data(), index_size);
     vkUnmapMemory(gpu_.device, mesh.index_memory);
 
-    std::printf("[Kuma] Mesh loaded: %s (%zu vertices, %u indices)\n",
+    kuma::log::info("Mesh loaded: %s (%zu vertices, %u indices)",
         path, vertices.size(), mesh.index_count);
 
     auto [inserted, _] = mesh_cache_.emplace(path, mesh);

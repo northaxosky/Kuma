@@ -11,7 +11,7 @@ std::vector<char> read_binary_file(const char* path) {
     std::ifstream file(path, std::ios::ate | std::ios::binary);
 
     if (!file.is_open()) {
-        std::printf("[Kuma] Failed to open file: %s\n", path);
+        kuma::log::error("Failed to open file: %s", path);
         return {};
     }
 
@@ -35,7 +35,7 @@ VkShaderModule RendererImpl::create_shader_module(const std::vector<char>& code)
     VkShaderModule shader_module = VK_NULL_HANDLE;
     VkResult result = vkCreateShaderModule(device_, &create_info, nullptr, &shader_module);
     if (result != VK_SUCCESS) {
-        std::printf("[Kuma] Failed to create shader module\n");
+        kuma::log::error("Failed to create shader module");
         return VK_NULL_HANDLE;
     }
 
@@ -49,7 +49,7 @@ bool RendererImpl::create_graphics_pipeline() {
     auto frag_code = read_binary_file("shaders/quad.frag.spv");
 
     if (vert_code.empty() || frag_code.empty()) {
-        std::printf("[Kuma] Failed to load shader files\n");
+        kuma::log::error("Failed to load shader files");
         return false;
     }
 
@@ -168,7 +168,7 @@ bool RendererImpl::create_graphics_pipeline() {
 
     if (vkCreateDescriptorSetLayout(device_, &layout_binding_info, nullptr,
             &descriptor_set_layout_) != VK_SUCCESS) {
-        std::printf("[Kuma] Failed to create descriptor set layout\n");
+        kuma::log::error("Failed to create descriptor set layout");
         vkDestroyShaderModule(device_, vert_module, nullptr);
         vkDestroyShaderModule(device_, frag_module, nullptr);
         return false;
@@ -181,7 +181,7 @@ bool RendererImpl::create_graphics_pipeline() {
 
     VkResult result = vkCreatePipelineLayout(device_, &layout_info, nullptr, &pipeline_layout_);
     if (result != VK_SUCCESS) {
-        std::printf("[Kuma] Failed to create pipeline layout\n");
+        kuma::log::error("Failed to create pipeline layout");
         vkDestroyShaderModule(device_, vert_module, nullptr);
         vkDestroyShaderModule(device_, frag_module, nullptr);
         return false;
@@ -211,11 +211,11 @@ bool RendererImpl::create_graphics_pipeline() {
     vkDestroyShaderModule(device_, frag_module, nullptr);
 
     if (result != VK_SUCCESS) {
-        std::printf("[Kuma] Failed to create graphics pipeline (error %d)\n", result);
+        kuma::log::error("Failed to create graphics pipeline (error %d)", result);
         return false;
     }
 
-    std::printf("[Kuma] Graphics pipeline created\n");
+    kuma::log::info("Graphics pipeline created");
     return true;
 }
 

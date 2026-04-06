@@ -78,7 +78,7 @@ bool RendererImpl::init(const RendererConfig& config) {
     if (!create_command_buffers())    return false;
     if (!create_sync_objects())       return false;
 
-    std::printf("[Kuma] Vulkan renderer initialized\n");
+    kuma::log::info("Vulkan renderer initialized");
     return true;
 }
 
@@ -118,7 +118,7 @@ void RendererImpl::shutdown() {
 
     vkDestroyInstance(instance_, nullptr);
     device_ = VK_NULL_HANDLE;
-    std::printf("[Kuma] Vulkan renderer shut down\n");
+    kuma::log::info("Vulkan renderer shut down");
 }
 
 // ── Per-Frame Rendering ─────────────────────────────────────────

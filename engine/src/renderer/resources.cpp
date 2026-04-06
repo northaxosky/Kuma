@@ -78,7 +78,7 @@ void RendererImpl::transition_image_layout(VkImage image,
         src_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
         dst_stage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
     } else {
-        std::printf("[Kuma] Unsupported layout transition\n");
+        kuma::log::error("Unsupported layout transition");
         end_single_command(cmd);
         return;
     }
@@ -129,7 +129,7 @@ bool RendererImpl::create_descriptor_sets() {
     pool_info.maxSets = MAX_FRAMES_IN_FLIGHT;
 
     if (vkCreateDescriptorPool(device_, &pool_info, nullptr, &descriptor_pool_) != VK_SUCCESS) {
-        std::printf("[Kuma] Failed to create descriptor pool\n");
+        kuma::log::error("Failed to create descriptor pool");
         return false;
     }
 
@@ -143,7 +143,7 @@ bool RendererImpl::create_descriptor_sets() {
 
     descriptor_sets_.resize(MAX_FRAMES_IN_FLIGHT);
     if (vkAllocateDescriptorSets(device_, &set_alloc_info, descriptor_sets_.data()) != VK_SUCCESS) {
-        std::printf("[Kuma] Failed to allocate descriptor sets\n");
+        kuma::log::error("Failed to allocate descriptor sets");
         return false;
     }
 
@@ -165,7 +165,7 @@ bool RendererImpl::create_descriptor_sets() {
         vkUpdateDescriptorSets(device_, 1, &write, 0, nullptr);
     }
 
-    std::printf("[Kuma] Descriptor sets created\n");
+    kuma::log::info("Descriptor sets created");
     return true;
 }
 
@@ -179,7 +179,7 @@ bool RendererImpl::create_command_pool() {
 
     VkResult result = vkCreateCommandPool(device_, &pool_info, nullptr, &command_pool_);
     if (result != VK_SUCCESS) {
-        std::printf("[Kuma] Failed to create command pool\n");
+        kuma::log::error("Failed to create command pool");
         return false;
     }
     return true;
@@ -196,7 +196,7 @@ bool RendererImpl::create_command_buffers() {
 
     VkResult result = vkAllocateCommandBuffers(device_, &alloc_info, command_buffers_.data());
     if (result != VK_SUCCESS) {
-        std::printf("[Kuma] Failed to allocate command buffers\n");
+        kuma::log::error("Failed to allocate command buffers");
         return false;
     }
     return true;
@@ -221,14 +221,14 @@ bool RendererImpl::create_sync_objects() {
     for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         if (vkCreateSemaphore(device_, &sem_info, nullptr, &image_available_semaphores_[i]) != VK_SUCCESS ||
             vkCreateFence(device_, &fence_info, nullptr, &in_flight_fences_[i]) != VK_SUCCESS) {
-            std::printf("[Kuma] Failed to create sync objects\n");
+            kuma::log::error("Failed to create sync objects");
             return false;
         }
     }
 
     for (uint32_t i = 0; i < image_count; i++) {
         if (vkCreateSemaphore(device_, &sem_info, nullptr, &render_finished_semaphores_[i]) != VK_SUCCESS) {
-            std::printf("[Kuma] Failed to create render finished semaphore\n");
+            kuma::log::error("Failed to create render finished semaphore");
             return false;
         }
     }
@@ -253,7 +253,7 @@ uint32_t RendererImpl::find_memory_type(uint32_t type_filter,
         }
     }
 
-    std::printf("[Kuma] Failed to find suitable memory type\n");
+    kuma::log::error("Failed to find suitable memory type");
     return 0;
 }
 

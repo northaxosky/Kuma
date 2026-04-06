@@ -39,7 +39,7 @@ bool RendererImpl::create_swapchain() {
 
     VkResult result = vkCreateSwapchainKHR(device_, &create_info, nullptr, &swapchain_);
     if (result != VK_SUCCESS) {
-        std::printf("[Kuma] Failed to create swapchain (error %d)\n", result);
+        kuma::log::error("Failed to create swapchain (error %d)", result);
         return false;
     }
 
@@ -71,12 +71,12 @@ bool RendererImpl::create_swapchain() {
 
         result = vkCreateImageView(device_, &view_info, nullptr, &swapchain_image_views_[i]);
         if (result != VK_SUCCESS) {
-            std::printf("[Kuma] Failed to create image view %u\n", i);
+            kuma::log::error("Failed to create image view %u", i);
             return false;
         }
     }
 
-    std::printf("[Kuma] Swapchain created: %ux%u (%u images)\n",
+    kuma::log::info("Swapchain created: %ux%u (%u images)",
         extent.width, extent.height, image_count);
     return true;
 }
@@ -163,7 +163,7 @@ bool RendererImpl::create_render_pass() {
 
     VkResult result = vkCreateRenderPass(device_, &create_info, nullptr, &render_pass_);
     if (result != VK_SUCCESS) {
-        std::printf("[Kuma] Failed to create render pass\n");
+        kuma::log::error("Failed to create render pass");
         return false;
     }
 
@@ -187,7 +187,7 @@ bool RendererImpl::create_framebuffers() {
 
         VkResult result = vkCreateFramebuffer(device_, &fb_info, nullptr, &framebuffers_[i]);
         if (result != VK_SUCCESS) {
-            std::printf("[Kuma] Failed to create framebuffer %zu\n", i);
+            kuma::log::error("Failed to create framebuffer %zu", i);
             return false;
         }
     }

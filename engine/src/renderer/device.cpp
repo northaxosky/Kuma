@@ -15,7 +15,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
     void* /*user_data*/)
 {
     if (severity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
-        std::printf("[Vulkan] %s\n", callback_data->pMessage);
+        kuma::log::warn("[Vulkan] %s", callback_data->pMessage);
     }
     return VK_FALSE;
 }
@@ -54,7 +54,7 @@ bool RendererImpl::create_instance() {
 
     VkResult result = vkCreateInstance(&create_info, nullptr, &instance_);
     if (result != VK_SUCCESS) {
-        std::printf("[Kuma] Failed to create Vulkan instance (error %d)\n", result);
+        kuma::log::error("Failed to create Vulkan instance (error %d)", result);
         return false;
     }
 
@@ -81,13 +81,13 @@ bool RendererImpl::create_debug_messenger() {
         vkGetInstanceProcAddr(instance_, "vkCreateDebugUtilsMessengerEXT"));
 
     if (!create_fn) {
-        std::printf("[Kuma] Debug messenger extension not available\n");
+        kuma::log::info("Debug messenger extension not available");
         return true;
     }
 
     VkResult result = create_fn(instance_, &create_info, nullptr, &debug_messenger_);
     if (result != VK_SUCCESS) {
-        std::printf("[Kuma] Failed to create debug messenger\n");
+        kuma::log::error("Failed to create debug messenger");
         return false;
     }
 
@@ -98,7 +98,7 @@ bool RendererImpl::create_debug_messenger() {
 
 bool RendererImpl::create_surface() {
     if (!SDL_Vulkan_CreateSurface(window_, instance_, nullptr, &surface_)) {
-        std::printf("[Kuma] Failed to create Vulkan surface: %s\n", SDL_GetError());
+        kuma::log::error("Failed to create Vulkan surface: %s", SDL_GetError());
         return false;
     }
     return true;
@@ -111,7 +111,7 @@ bool RendererImpl::pick_physical_device() {
     vkEnumeratePhysicalDevices(instance_, &device_count, nullptr);
 
     if (device_count == 0) {
-        std::printf("[Kuma] No Vulkan-capable GPUs found\n");
+        kuma::log::error("No Vulkan-capable GPUs found");
         return false;
     }
 
@@ -135,13 +135,13 @@ bool RendererImpl::pick_physical_device() {
                 physical_device_ = device;
                 queue_family_index_ = i;
 
-                std::printf("[Kuma] Selected GPU: %s\n", props.deviceName);
+                kuma::log::info("Selected GPU: %s", props.deviceName);
                 return true;
             }
         }
     }
 
-    std::printf("[Kuma] No suitable GPU found\n");
+    kuma::log::error("No suitable GPU found");
     return false;
 }
 
@@ -171,7 +171,7 @@ bool RendererImpl::create_logical_device() {
 
     VkResult result = vkCreateDevice(physical_device_, &create_info, nullptr, &device_);
     if (result != VK_SUCCESS) {
-        std::printf("[Kuma] Failed to create logical device (error %d)\n", result);
+        kuma::log::error("Failed to create logical device (error %d)", result);
         return false;
     }
 

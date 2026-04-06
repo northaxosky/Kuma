@@ -1,6 +1,6 @@
 #include <kuma/window.h>
+#include <kuma/log.h>
 #include <SDL3/SDL.h>
-#include <cstdio>
 
 namespace kuma {
 
@@ -39,14 +39,14 @@ bool Window::create(const WindowConfig& config) {
     );
 
     if (!window_) {
-        std::printf("[Kuma] Failed to create window: %s\n", SDL_GetError());
+        kuma::log::error("Failed to create window: %s", SDL_GetError());
         return false;
     }
 
     width_ = config.width;
     height_ = config.height;
 
-    std::printf("[Kuma] Window created: %s (%dx%d)\n",
+    kuma::log::info("Window created: %s (%dx%d)",
         config.title, width_, height_);
     return true;
 }
@@ -55,7 +55,7 @@ void Window::destroy() {
     if (window_) {
         SDL_DestroyWindow(window_);
         window_ = nullptr;
-        std::printf("[Kuma] Window destroyed\n");
+        kuma::log::info("Window destroyed");
     }
 }
 

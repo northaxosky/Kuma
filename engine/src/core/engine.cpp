@@ -1,6 +1,6 @@
 #include <kuma/kuma.h>
+#include <kuma/log.h>
 #include <SDL3/SDL.h>
-#include <cstdio>
 
 namespace kuma {
 
@@ -9,10 +9,10 @@ static Renderer s_renderer;
 static ResourceManager s_resource_manager;
 
 bool init(const EngineConfig& config) {
-    std::printf("[Kuma] Initializing engine: %s\n", config.app_name);
+    kuma::log::info("Initializing engine: %s", config.app_name);
 
     if (!SDL_Init(SDL_INIT_VIDEO)) {
-        std::printf("[Kuma] Failed to initialize SDL: %s\n", SDL_GetError());
+        kuma::log::error("Failed to initialize SDL: %s", SDL_GetError());
         return false;
     }
 
@@ -49,16 +49,20 @@ bool init(const EngineConfig& config) {
         return false;
     }
 
-    // Load the default texture via the resource manager and hand it to the renderer
+    // Load default resources via the resource manager
+    const auto* mesh = s_resource_manager.load_mesh("assets/models/quad.obj");
     const auto* texture = s_resource_manager.load_texture("assets/textures/VaultBoyNV.png");
-    if (!texture) {
-        std::printf("[Kuma] Failed to load default texture\n");
+
+    if (!mesh || !texture) {
+        kuma::log::error("Failed to load default resources");
         s_resource_manager.shutdown();
         s_renderer.shutdown();
         s_window.destroy();
         SDL_Quit();
         return false;
     }
+
+    s_renderer.set_mesh(mesh);
     s_renderer.set_texture(texture);
 
     return true;
@@ -69,7 +73,7 @@ void shutdown() {
     s_renderer.shutdown();
     s_window.destroy();
     SDL_Quit();
-    std::printf("[Kuma] Engine shut down\n");
+    kuma::log::info("Engine shut down");
 }
 
 Window& get_window() {
