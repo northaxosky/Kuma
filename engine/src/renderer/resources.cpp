@@ -218,23 +218,20 @@ void RendererImpl::copy_buffer_to_image(VkBuffer buffer, VkImage image,
 // ── Texture ────────────────────────────────────────────────────
 
 bool RendererImpl::create_texture() {
-    constexpr uint32_t TEX_WIDTH = 64;
-    constexpr uint32_t TEX_HEIGHT = 64;
-    constexpr uint32_t TILE_SIZE = 8;
+    // Load image from disk using stb_image.
+    // The last argument (4) forces RGBA output regardless of the file's format.
+    int tex_width = 0;
+    int tex_height = 0;
+    int tex_channels = 0;
+    stbi_uc* pixels = stbi_load("assets/textures/VaultBoyNV.png",
+        &tex_width, &tex_height, &tex_channels, STBI_rgb_alpha);
 
-    std::array<uint8_t, TEX_WIDTH * TEX_HEIGHT * 4> pixels;
-    for (uint32_t y = 0; y < TEX_HEIGHT; y++) {
-        for (uint32_t x = 0; x < TEX_WIDTH; x++) {
-            uint32_t i = (y * TEX_WIDTH + x) * 4;
-            bool white = ((x / TILE_SIZE) + (y / TILE_SIZE)) % 2 == 0;
-            pixels[i + 0] = white ? 255 : 50;
-            pixels[i + 1] = white ? 255 : 50;
-            pixels[i + 2] = white ? 255 : 50;
-            pixels[i + 3] = 255;
-        }
+    if (!pixels) {
+        std::printf("[Kuma] Failed to load texture: %s\n", stbi_failure_reason());
+        return false;
     }
 
-    VkDeviceSize image_size = TEX_WIDTH * TEX_HEIGHT * 4;
+    VkDeviceSize image_size = static_cast<VkDeviceSize>(tex_width) * tex_height * 4;
 
     // Staging buffer
     VkBuffer staging_buffer;
@@ -262,14 +259,17 @@ bool RendererImpl::create_texture() {
 
     void* data;
     vkMapMemory(device_, staging_memory, 0, image_size, 0, &data);
-    std::memcpy(data, pixels.data(), image_size);
+    std::memcpy(data, pixels, static_cast<size_t>(image_size));
     vkUnmapMemory(device_, staging_memory);
+
+    // Pixel data has been copied to the staging buffer — free the CPU copy
+    stbi_image_free(pixels);
 
     // GPU image
     VkImageCreateInfo img_info{};
     img_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     img_info.imageType = VK_IMAGE_TYPE_2D;
-    img_info.extent = {TEX_WIDTH, TEX_HEIGHT, 1};
+    img_info.extent = {static_cast<uint32_t>(tex_width), static_cast<uint32_t>(tex_height), 1};
     img_info.mipLevels = 1;
     img_info.arrayLayers = 1;
     img_info.format = VK_FORMAT_R8G8B8A8_SRGB;
@@ -300,7 +300,8 @@ bool RendererImpl::create_texture() {
         VK_IMAGE_LAYOUT_UNDEFINED,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
-    copy_buffer_to_image(staging_buffer, texture_image_, TEX_WIDTH, TEX_HEIGHT);
+    copy_buffer_to_image(staging_buffer, texture_image_,
+        static_cast<uint32_t>(tex_width), static_cast<uint32_t>(tex_height));
 
     transition_image_layout(texture_image_,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -345,7 +346,7 @@ bool RendererImpl::create_texture() {
         return false;
     }
 
-    std::printf("[Kuma] Texture created (%ux%u checkerboard)\n", TEX_WIDTH, TEX_HEIGHT);
+    std::printf("[Kuma] Texture loaded (%dx%d)\n", tex_width, tex_height);
     return true;
 }
 

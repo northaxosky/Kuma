@@ -19,3 +19,11 @@ add_custom_command(TARGET sandbox POST_BUILD
         $<TARGET_FILE_DIR:sandbox>/shaders
     COMMENT "Copying shaders to sandbox output directory"
 )
+
+# Copy game assets (textures, models, etc.) next to the executable.
+add_custom_command(TARGET sandbox POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_SOURCE_DIR}/assets
+        $<TARGET_FILE_DIR:sandbox>/assets
+    COMMENT "Copying assets to sandbox output directory"
+)
