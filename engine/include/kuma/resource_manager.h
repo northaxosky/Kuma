@@ -16,8 +16,9 @@ public:
     ResourceManager(const ResourceManager&) = delete;
     ResourceManager& operator=(const ResourceManager&) = delete;
 
-    // Called by the engine during init/shutdown (not by game code)
-    bool init();
+    // Called by the engine during init/shutdown (not by game code).
+    // gpu_context is an opaque pointer from Renderer::gpu_context().
+    bool init(void* gpu_context);
     void shutdown();
 
     // Load a texture from an image file (PNG, JPG, etc.)

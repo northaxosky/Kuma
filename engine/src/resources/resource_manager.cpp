@@ -17,58 +17,45 @@
 
 namespace kuma {
 
-// ── GPU Context ─────────────────────────────────────────────────
-// The minimal set of Vulkan handles needed to create GPU resources.
-// Passed from the renderer at init time.
-
-struct GpuContext {
-    VkDevice device = VK_NULL_HANDLE;
-    VkPhysicalDevice physical_device = VK_NULL_HANDLE;
-    VkCommandPool command_pool = VK_NULL_HANDLE;
-    VkQueue graphics_queue = VK_NULL_HANDLE;
-};
-
 // ── Implementation ──────────────────────────────────────────────
 
 class ResourceManager::Impl {
 public:
-    bool init() {
+    bool init(GpuContext gpu) {
+        gpu_ = gpu;
         return true;
     }
 
-    void shutdown(VkDevice device) {
+    void shutdown() {
         for (auto& [path, texture] : texture_cache_) {
             if (texture.sampler != VK_NULL_HANDLE)
-                vkDestroySampler(device, texture.sampler, nullptr);
+                vkDestroySampler(gpu_.device, texture.sampler, nullptr);
             if (texture.view != VK_NULL_HANDLE)
-                vkDestroyImageView(device, texture.view, nullptr);
+                vkDestroyImageView(gpu_.device, texture.view, nullptr);
             if (texture.image != VK_NULL_HANDLE) {
-                vkDestroyImage(device, texture.image, nullptr);
-                vkFreeMemory(device, texture.memory, nullptr);
+                vkDestroyImage(gpu_.device, texture.image, nullptr);
+                vkFreeMemory(gpu_.device, texture.memory, nullptr);
             }
         }
         texture_cache_.clear();
     }
 
-    const Texture* load_texture(const char* path, const GpuContext& gpu);
+    const Texture* load_texture(const char* path);
+
+    GpuContext gpu_;
 
     // Cache: path → loaded resource
     std::unordered_map<std::string, Texture> texture_cache_;
 
 private:
-    // GPU helpers
-    uint32_t find_memory_type(VkPhysicalDevice physical_device,
-        uint32_t type_filter, VkMemoryPropertyFlags properties) const;
-
-    VkCommandBuffer begin_single_command(VkDevice device,
-        VkCommandPool command_pool) const;
-    void end_single_command(VkDevice device, VkCommandPool command_pool,
-        VkQueue queue, VkCommandBuffer cmd) const;
-
-    void transition_image_layout(const GpuContext& gpu, VkImage image,
+    uint32_t find_memory_type(uint32_t type_filter,
+        VkMemoryPropertyFlags properties) const;
+    VkCommandBuffer begin_single_command() const;
+    void end_single_command(VkCommandBuffer cmd) const;
+    void transition_image_layout(VkImage image,
         VkImageLayout old_layout, VkImageLayout new_layout);
-    void copy_buffer_to_image(const GpuContext& gpu, VkBuffer buffer,
-        VkImage image, uint32_t width, uint32_t height);
+    void copy_buffer_to_image(VkBuffer buffer, VkImage image,
+        uint32_t width, uint32_t height);
 };
 
 // ── Public wrapper ──────────────────────────────────────────────
@@ -79,24 +66,22 @@ ResourceManager::~ResourceManager() {
     shutdown();
 }
 
-bool ResourceManager::init() {
+bool ResourceManager::init(void* gpu_context) {
     impl_ = new Impl();
-    return impl_->init();
+    auto* ctx = static_cast<GpuContext*>(gpu_context);
+    return impl_->init(*ctx);
 }
 
 void ResourceManager::shutdown() {
     if (impl_) {
-        // We can't clean up GPU resources without the device.
-        // For now, the renderer handles cleanup of resources it created.
+        impl_->shutdown();
         delete impl_;
         impl_ = nullptr;
     }
 }
 
 const Texture* ResourceManager::load_texture(const char* path) {
-    // TODO: wire up GPU context once renderer exposes it
-    (void)path;
-    return nullptr;
+    return impl_->load_texture(path);
 }
 
 const Mesh* ResourceManager::load_mesh(const char* path) {
@@ -109,11 +94,11 @@ const Mesh* ResourceManager::load_mesh(const char* path) {
 // These are the same functions from resources.cpp, but taking explicit
 // parameters instead of reading RendererImpl member variables.
 
-uint32_t ResourceManager::Impl::find_memory_type(VkPhysicalDevice physical_device,
+uint32_t ResourceManager::Impl::find_memory_type(
     uint32_t type_filter, VkMemoryPropertyFlags properties) const
 {
     VkPhysicalDeviceMemoryProperties mem_props;
-    vkGetPhysicalDeviceMemoryProperties(physical_device, &mem_props);
+    vkGetPhysicalDeviceMemoryProperties(gpu_.physical_device, &mem_props);
 
     for (uint32_t i = 0; i < mem_props.memoryTypeCount; i++) {
         bool type_suitable = (type_filter & (1 << i)) != 0;
@@ -128,17 +113,16 @@ uint32_t ResourceManager::Impl::find_memory_type(VkPhysicalDevice physical_devic
     return 0;
 }
 
-VkCommandBuffer ResourceManager::Impl::begin_single_command(VkDevice device,
-    VkCommandPool command_pool) const
+VkCommandBuffer ResourceManager::Impl::begin_single_command() const
 {
     VkCommandBufferAllocateInfo alloc_info{};
     alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    alloc_info.commandPool = command_pool;
+    alloc_info.commandPool = gpu_.command_pool;
     alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     alloc_info.commandBufferCount = 1;
 
     VkCommandBuffer cmd;
-    vkAllocateCommandBuffers(device, &alloc_info, &cmd);
+    vkAllocateCommandBuffers(gpu_.device, &alloc_info, &cmd);
 
     VkCommandBufferBeginInfo begin_info{};
     begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -148,8 +132,7 @@ VkCommandBuffer ResourceManager::Impl::begin_single_command(VkDevice device,
     return cmd;
 }
 
-void ResourceManager::Impl::end_single_command(VkDevice device,
-    VkCommandPool command_pool, VkQueue queue, VkCommandBuffer cmd) const
+void ResourceManager::Impl::end_single_command(VkCommandBuffer cmd) const
 {
     vkEndCommandBuffer(cmd);
 
@@ -158,16 +141,15 @@ void ResourceManager::Impl::end_single_command(VkDevice device,
     submit_info.commandBufferCount = 1;
     submit_info.pCommandBuffers = &cmd;
 
-    vkQueueSubmit(queue, 1, &submit_info, VK_NULL_HANDLE);
-    vkQueueWaitIdle(queue);
+    vkQueueSubmit(gpu_.graphics_queue, 1, &submit_info, VK_NULL_HANDLE);
+    vkQueueWaitIdle(gpu_.graphics_queue);
 
-    vkFreeCommandBuffers(device, command_pool, 1, &cmd);
+    vkFreeCommandBuffers(gpu_.device, gpu_.command_pool, 1, &cmd);
 }
 
-void ResourceManager::Impl::transition_image_layout(const GpuContext& gpu,
-    VkImage image, VkImageLayout old_layout, VkImageLayout new_layout)
+void ResourceManager::Impl::transition_image_layout(VkImage image, VkImageLayout old_layout, VkImageLayout new_layout)
 {
-    VkCommandBuffer cmd = begin_single_command(gpu.device, gpu.command_pool);
+    VkCommandBuffer cmd = begin_single_command();
 
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -199,20 +181,20 @@ void ResourceManager::Impl::transition_image_layout(const GpuContext& gpu,
         dst_stage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
     } else {
         std::printf("[Kuma] Unsupported layout transition\n");
-        end_single_command(gpu.device, gpu.command_pool, gpu.graphics_queue, cmd);
+        end_single_command(cmd);
         return;
     }
 
     vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0,
         0, nullptr, 0, nullptr, 1, &barrier);
 
-    end_single_command(gpu.device, gpu.command_pool, gpu.graphics_queue, cmd);
+    end_single_command(cmd);
 }
 
-void ResourceManager::Impl::copy_buffer_to_image(const GpuContext& gpu,
+void ResourceManager::Impl::copy_buffer_to_image(
     VkBuffer buffer, VkImage image, uint32_t width, uint32_t height)
 {
-    VkCommandBuffer cmd = begin_single_command(gpu.device, gpu.command_pool);
+    VkCommandBuffer cmd = begin_single_command();
 
     VkBufferImageCopy region{};
     region.bufferOffset = 0;
@@ -228,13 +210,12 @@ void ResourceManager::Impl::copy_buffer_to_image(const GpuContext& gpu,
     vkCmdCopyBufferToImage(cmd, buffer, image,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
-    end_single_command(gpu.device, gpu.command_pool, gpu.graphics_queue, cmd);
+    end_single_command(cmd);
 }
 
 // ── Texture Loading ─────────────────────────────────────────────
 
-const Texture* ResourceManager::Impl::load_texture(const char* path,
-    const GpuContext& gpu)
+const Texture* ResourceManager::Impl::load_texture(const char* path)
 {
     // Check cache first
     auto it = texture_cache_.find(path);
@@ -265,24 +246,24 @@ const Texture* ResourceManager::Impl::load_texture(const char* path,
     staging_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     staging_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    vkCreateBuffer(gpu.device, &staging_info, nullptr, &staging_buffer);
+    vkCreateBuffer(gpu_.device, &staging_info, nullptr, &staging_buffer);
 
     VkMemoryRequirements mem_reqs;
-    vkGetBufferMemoryRequirements(gpu.device, staging_buffer, &mem_reqs);
+    vkGetBufferMemoryRequirements(gpu_.device, staging_buffer, &mem_reqs);
 
     VkMemoryAllocateInfo alloc_info{};
     alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     alloc_info.allocationSize = mem_reqs.size;
-    alloc_info.memoryTypeIndex = find_memory_type(gpu.physical_device, mem_reqs.memoryTypeBits,
+    alloc_info.memoryTypeIndex = find_memory_type(mem_reqs.memoryTypeBits,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
-    vkAllocateMemory(gpu.device, &alloc_info, nullptr, &staging_memory);
-    vkBindBufferMemory(gpu.device, staging_buffer, staging_memory, 0);
+    vkAllocateMemory(gpu_.device, &alloc_info, nullptr, &staging_memory);
+    vkBindBufferMemory(gpu_.device, staging_buffer, staging_memory, 0);
 
     void* data;
-    vkMapMemory(gpu.device, staging_memory, 0, image_size, 0, &data);
+    vkMapMemory(gpu_.device, staging_memory, 0, image_size, 0, &data);
     std::memcpy(data, pixels, static_cast<size_t>(image_size));
-    vkUnmapMemory(gpu.device, staging_memory);
+    vkUnmapMemory(gpu_.device, staging_memory);
 
     stbi_image_free(pixels);
 
@@ -302,36 +283,36 @@ const Texture* ResourceManager::Impl::load_texture(const char* path,
     img_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     img_info.samples = VK_SAMPLE_COUNT_1_BIT;
 
-    if (vkCreateImage(gpu.device, &img_info, nullptr, &texture.image) != VK_SUCCESS) {
+    if (vkCreateImage(gpu_.device, &img_info, nullptr, &texture.image) != VK_SUCCESS) {
         std::printf("[Kuma] Failed to create texture image\n");
-        vkDestroyBuffer(gpu.device, staging_buffer, nullptr);
-        vkFreeMemory(gpu.device, staging_memory, nullptr);
+        vkDestroyBuffer(gpu_.device, staging_buffer, nullptr);
+        vkFreeMemory(gpu_.device, staging_memory, nullptr);
         return nullptr;
     }
 
-    vkGetImageMemoryRequirements(gpu.device, texture.image, &mem_reqs);
+    vkGetImageMemoryRequirements(gpu_.device, texture.image, &mem_reqs);
 
     alloc_info.allocationSize = mem_reqs.size;
-    alloc_info.memoryTypeIndex = find_memory_type(gpu.physical_device, mem_reqs.memoryTypeBits,
+    alloc_info.memoryTypeIndex = find_memory_type(mem_reqs.memoryTypeBits,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-    vkAllocateMemory(gpu.device, &alloc_info, nullptr, &texture.memory);
-    vkBindImageMemory(gpu.device, texture.image, texture.memory, 0);
+    vkAllocateMemory(gpu_.device, &alloc_info, nullptr, &texture.memory);
+    vkBindImageMemory(gpu_.device, texture.image, texture.memory, 0);
 
     // Transfer
-    transition_image_layout(gpu, texture.image,
+    transition_image_layout(texture.image,
         VK_IMAGE_LAYOUT_UNDEFINED,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
-    copy_buffer_to_image(gpu, staging_buffer, texture.image,
+    copy_buffer_to_image(staging_buffer, texture.image,
         static_cast<uint32_t>(tex_width), static_cast<uint32_t>(tex_height));
 
-    transition_image_layout(gpu, texture.image,
+    transition_image_layout(texture.image,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
-    vkDestroyBuffer(gpu.device, staging_buffer, nullptr);
-    vkFreeMemory(gpu.device, staging_memory, nullptr);
+    vkDestroyBuffer(gpu_.device, staging_buffer, nullptr);
+    vkFreeMemory(gpu_.device, staging_memory, nullptr);
 
     // Image view
     VkImageViewCreateInfo view_info{};
@@ -345,7 +326,7 @@ const Texture* ResourceManager::Impl::load_texture(const char* path,
     view_info.subresourceRange.baseArrayLayer = 0;
     view_info.subresourceRange.layerCount = 1;
 
-    if (vkCreateImageView(gpu.device, &view_info, nullptr, &texture.view) != VK_SUCCESS) {
+    if (vkCreateImageView(gpu_.device, &view_info, nullptr, &texture.view) != VK_SUCCESS) {
         std::printf("[Kuma] Failed to create texture image view\n");
         return nullptr;
     }
@@ -364,7 +345,7 @@ const Texture* ResourceManager::Impl::load_texture(const char* path,
     sampler_info.compareEnable = VK_FALSE;
     sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
 
-    if (vkCreateSampler(gpu.device, &sampler_info, nullptr, &texture.sampler) != VK_SUCCESS) {
+    if (vkCreateSampler(gpu_.device, &sampler_info, nullptr, &texture.sampler) != VK_SUCCESS) {
         std::printf("[Kuma] Failed to create texture sampler\n");
         return nullptr;
     }

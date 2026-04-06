@@ -53,6 +53,17 @@ struct Mesh {
     uint32_t index_count = 0;
 };
 
+// ── GPU Context ─────────────────────────────────────────────────
+// The minimal set of Vulkan handles needed to create GPU resources.
+// Shared between the renderer and the resource manager.
+
+struct GpuContext {
+    VkDevice device = VK_NULL_HANDLE;
+    VkPhysicalDevice physical_device = VK_NULL_HANDLE;
+    VkCommandPool command_pool = VK_NULL_HANDLE;
+    VkQueue graphics_queue = VK_NULL_HANDLE;
+};
+
 // ── File I/O ────────────────────────────────────────────────────
 
 std::vector<char> read_binary_file(const char* path);
@@ -73,6 +84,10 @@ public:
     bool begin_frame();
     void end_frame();
     void on_resize(int32_t width, int32_t height);
+    GpuContext gpu_context() const;
+
+    // Set texture loaded by the resource manager (replaces internal texture)
+    void set_texture(const Texture* texture);
 
 private:
     // ── device.cpp ──────────────────────────────────────────────
@@ -99,7 +114,6 @@ private:
     // ── resources.cpp ───────────────────────────────────────────
     bool create_vertex_buffer();
     bool create_index_buffer();
-    bool create_texture();
     bool create_descriptor_sets();
     bool create_command_pool();
     bool create_command_buffers();
@@ -147,7 +161,7 @@ private:
 
     // Geometry + texture
     Mesh mesh_;
-    Texture texture_;
+    const Texture* texture_ = nullptr;   // owned by ResourceManager
 
     // Descriptors
     VkDescriptorSetLayout descriptor_set_layout_ = VK_NULL_HANDLE;

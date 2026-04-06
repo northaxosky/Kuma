@@ -44,6 +44,15 @@ void Renderer::on_resize(int32_t width, int32_t height) {
     impl_->on_resize(width, height);
 }
 
+void Renderer::set_texture(const void* texture) {
+    impl_->set_texture(static_cast<const Texture*>(texture));
+}
+
+void* Renderer::gpu_context() {
+    static GpuContext ctx = impl_->gpu_context();
+    return &ctx;
+}
+
 // ── RendererImpl Init/Shutdown ──────────────────────────────────
 
 bool RendererImpl::init(const RendererConfig& config) {
@@ -64,8 +73,6 @@ bool RendererImpl::init(const RendererConfig& config) {
     if (!create_vertex_buffer())      return false;
     if (!create_index_buffer())       return false;
     if (!create_command_pool())       return false;
-    if (!create_texture())            return false;
-    if (!create_descriptor_sets())    return false;
     if (!create_command_buffers())    return false;
     if (!create_sync_objects())       return false;
 
@@ -89,14 +96,7 @@ void RendererImpl::shutdown() {
         vkDestroyDescriptorPool(device_, descriptor_pool_, nullptr);
     }
 
-    if (texture_.sampler != VK_NULL_HANDLE)
-        vkDestroySampler(device_, texture_.sampler, nullptr);
-    if (texture_.view != VK_NULL_HANDLE)
-        vkDestroyImageView(device_, texture_.view, nullptr);
-    if (texture_.image != VK_NULL_HANDLE) {
-        vkDestroyImage(device_, texture_.image, nullptr);
-        vkFreeMemory(device_, texture_.memory, nullptr);
-    }
+    // Texture is owned by ResourceManager — not destroyed here.
 
     if (mesh_.index_buffer != VK_NULL_HANDLE) {
         vkDestroyBuffer(device_, mesh_.index_buffer, nullptr);
@@ -239,6 +239,24 @@ void RendererImpl::on_resize(int32_t width, int32_t height) {
     width_ = width;
     height_ = height;
     framebuffer_resized_ = true;
+}
+
+GpuContext RendererImpl::gpu_context() const {
+    return GpuContext{device_, physical_device_, command_pool_, graphics_queue_};
+}
+
+void RendererImpl::set_texture(const Texture* texture) {
+    texture_ = texture;
+
+    // Recreate descriptor sets to point at the new texture
+    if (descriptor_pool_ != VK_NULL_HANDLE) {
+        vkDestroyDescriptorPool(device_, descriptor_pool_, nullptr);
+        descriptor_pool_ = VK_NULL_HANDLE;
+    }
+
+    if (texture_ != nullptr) {
+        create_descriptor_sets();
+    }
 }
 
 } // namespace kuma

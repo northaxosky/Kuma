@@ -3,7 +3,6 @@
 // and GPU memory helpers.
 
 #include "renderer_impl.h"
-#include "stb_image.h"
 
 namespace kuma {
 
@@ -217,143 +216,7 @@ void RendererImpl::copy_buffer_to_image(VkBuffer buffer, VkImage image,
     end_single_command(cmd);
 }
 
-// ── Texture ────────────────────────────────────────────────────
-
-bool RendererImpl::create_texture() {
-    // Load image from disk using stb_image.
-    // The last argument (4) forces RGBA output regardless of the file's format.
-    int tex_width = 0;
-    int tex_height = 0;
-    int tex_channels = 0;
-    stbi_uc* pixels = stbi_load("assets/textures/VaultBoyNV.png",
-        &tex_width, &tex_height, &tex_channels, STBI_rgb_alpha);
-
-    if (!pixels) {
-        std::printf("[Kuma] Failed to load texture: %s\n", stbi_failure_reason());
-        return false;
-    }
-
-    VkDeviceSize image_size = static_cast<VkDeviceSize>(tex_width) * tex_height * 4;
-
-    // Staging buffer
-    VkBuffer staging_buffer;
-    VkDeviceMemory staging_memory;
-
-    VkBufferCreateInfo staging_info{};
-    staging_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    staging_info.size = image_size;
-    staging_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-    staging_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    vkCreateBuffer(device_, &staging_info, nullptr, &staging_buffer);
-
-    VkMemoryRequirements mem_reqs;
-    vkGetBufferMemoryRequirements(device_, staging_buffer, &mem_reqs);
-
-    VkMemoryAllocateInfo alloc_info{};
-    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    alloc_info.allocationSize = mem_reqs.size;
-    alloc_info.memoryTypeIndex = find_memory_type(mem_reqs.memoryTypeBits,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-    vkAllocateMemory(device_, &alloc_info, nullptr, &staging_memory);
-    vkBindBufferMemory(device_, staging_buffer, staging_memory, 0);
-
-    void* data;
-    vkMapMemory(device_, staging_memory, 0, image_size, 0, &data);
-    std::memcpy(data, pixels, static_cast<size_t>(image_size));
-    vkUnmapMemory(device_, staging_memory);
-
-    // Pixel data has been copied to the staging buffer — free the CPU copy
-    stbi_image_free(pixels);
-
-    // GPU image
-    VkImageCreateInfo img_info{};
-    img_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    img_info.imageType = VK_IMAGE_TYPE_2D;
-    img_info.extent = {static_cast<uint32_t>(tex_width), static_cast<uint32_t>(tex_height), 1};
-    img_info.mipLevels = 1;
-    img_info.arrayLayers = 1;
-    img_info.format = VK_FORMAT_R8G8B8A8_SRGB;
-    img_info.tiling = VK_IMAGE_TILING_OPTIMAL;
-    img_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    img_info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    img_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    img_info.samples = VK_SAMPLE_COUNT_1_BIT;
-
-    if (vkCreateImage(device_, &img_info, nullptr, &texture_.image) != VK_SUCCESS) {
-        std::printf("[Kuma] Failed to create texture image\n");
-        vkDestroyBuffer(device_, staging_buffer, nullptr);
-        vkFreeMemory(device_, staging_memory, nullptr);
-        return false;
-    }
-
-    vkGetImageMemoryRequirements(device_, texture_.image, &mem_reqs);
-
-    alloc_info.allocationSize = mem_reqs.size;
-    alloc_info.memoryTypeIndex = find_memory_type(mem_reqs.memoryTypeBits,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-    vkAllocateMemory(device_, &alloc_info, nullptr, &texture_.memory);
-    vkBindImageMemory(device_, texture_.image, texture_.memory, 0);
-
-    // Transfer
-    transition_image_layout(texture_.image,
-        VK_IMAGE_LAYOUT_UNDEFINED,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-
-    copy_buffer_to_image(staging_buffer, texture_.image,
-        static_cast<uint32_t>(tex_width), static_cast<uint32_t>(tex_height));
-
-    transition_image_layout(texture_.image,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-
-    vkDestroyBuffer(device_, staging_buffer, nullptr);
-    vkFreeMemory(device_, staging_memory, nullptr);
-
-    // Image view
-    VkImageViewCreateInfo view_info{};
-    view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    view_info.image = texture_.image;
-    view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    view_info.format = VK_FORMAT_R8G8B8A8_SRGB;
-    view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    view_info.subresourceRange.baseMipLevel = 0;
-    view_info.subresourceRange.levelCount = 1;
-    view_info.subresourceRange.baseArrayLayer = 0;
-    view_info.subresourceRange.layerCount = 1;
-
-    if (vkCreateImageView(device_, &view_info, nullptr, &texture_.view) != VK_SUCCESS) {
-        std::printf("[Kuma] Failed to create texture image view\n");
-        return false;
-    }
-
-    // Sampler
-    VkSamplerCreateInfo sampler_info{};
-    sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    sampler_info.magFilter = VK_FILTER_NEAREST;
-    sampler_info.minFilter = VK_FILTER_NEAREST;
-    sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampler_info.anisotropyEnable = VK_FALSE;
-    sampler_info.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
-    sampler_info.unnormalizedCoordinates = VK_FALSE;
-    sampler_info.compareEnable = VK_FALSE;
-    sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-
-    if (vkCreateSampler(device_, &sampler_info, nullptr, &texture_.sampler) != VK_SUCCESS) {
-        std::printf("[Kuma] Failed to create texture sampler\n");
-        return false;
-    }
-
-    texture_.width = static_cast<uint32_t>(tex_width);
-    texture_.height = static_cast<uint32_t>(tex_height);
-
-    std::printf("[Kuma] Texture loaded (%ux%u)\n", texture_.width, texture_.height);
-    return true;
-}
+// ── Texture (now loaded by ResourceManager) ────────────────────
 
 // ── Descriptor Sets ────────────────────────────────────────────
 
@@ -390,8 +253,8 @@ bool RendererImpl::create_descriptor_sets() {
     for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         VkDescriptorImageInfo image_info{};
         image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        image_info.imageView = texture_.view;
-        image_info.sampler = texture_.sampler;
+        image_info.imageView = texture_->view;
+        image_info.sampler = texture_->sampler;
 
         VkWriteDescriptorSet write{};
         write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;

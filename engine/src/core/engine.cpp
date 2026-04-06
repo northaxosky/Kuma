@@ -42,12 +42,24 @@ bool init(const EngineConfig& config) {
         return false;
     }
 
-    if (!s_resource_manager.init()) {
+    if (!s_resource_manager.init(s_renderer.gpu_context())) {
         s_renderer.shutdown();
         s_window.destroy();
         SDL_Quit();
         return false;
     }
+
+    // Load the default texture via the resource manager and hand it to the renderer
+    const auto* texture = s_resource_manager.load_texture("assets/textures/VaultBoyNV.png");
+    if (!texture) {
+        std::printf("[Kuma] Failed to load default texture\n");
+        s_resource_manager.shutdown();
+        s_renderer.shutdown();
+        s_window.destroy();
+        SDL_Quit();
+        return false;
+    }
+    s_renderer.set_texture(texture);
 
     return true;
 }
