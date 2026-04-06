@@ -1,51 +1,94 @@
 # Kuma
 
-Lightweight game engine built from scratch in C++ and Rust.
+Lightweight game engine built from scratch in C++ (with Rust where it makes sense).
 
 Kuma is designed for small, indie games — prioritizing simplicity, modularity, and ease of use over being everything to everyone.
 
 ## Status
 
-🚧 **Early development** — scaffolding and architecture phase.
+🚧 **Early development** — core systems being built bottom-up.
 
-## Features (Planned)
+### What's Working
 
-- **Vulkan renderer** — modern GPU-driven rendering
-- **SDL platform layer** — cross-platform windowing and input
-- **ECS architecture** — data-oriented entity management
-- **Asset pipeline** — resource loading with hot-reload support
-- **Audio system** — spatial and ambient sound
+- **Vulkan renderer** — graphics pipeline, textured quads, shader compilation
+- **SDL3 platform layer** — windowing, event loop, resize handling
+- **Resource system** — load textures (PNG/JPG) and meshes (OBJ) from disk with caching
+- **Logging** — severity levels, colored console output
+
+### What's Next
+
+- Scene graph / ECS
+- Input system (keyboard, mouse)
+- MVP matrices (3D rendering)
+- Audio, physics
 
 ## Building
 
 ### Requirements
 
 - CMake 3.24+
-- C++20 compatible compiler (MSVC 2022, GCC 12+, or Clang 15+)
+- C++20 compiler (MSVC 2022, GCC 12+, or Clang 15+)
+- Vulkan SDK
 
-### Build
+### Build & Run
 
 ```bash
 cmake -B build -S .
-cmake --build build
+cmake --build build --config Debug
+./build/bin/Debug/sandbox
 ```
 
-### Run the sandbox
-
-```bash
-./build/bin/sandbox
-```
+Or in VS Code: press **F5** (launch.json and tasks.json are included).
 
 ## Project Structure
 
-```txt
-engine/          Engine library (core, platform, renderer)
-  include/kuma/  Public API headers
-  src/           Implementation
-sandbox/         Test application
-tests/           Unit tests
-docs/            Documentation
+```text
+Kuma/
+├── engine/                     Engine static library
+│   ├── include/kuma/           Public API headers
+│   │   ├── kuma.h              Main entry point
+│   │   ├── renderer.h          Renderer interface
+│   │   ├── resource_manager.h  Resource loading + caching
+│   │   ├── window.h            Window management
+│   │   └── log.h               Logging system
+│   ├── src/
+│   │   ├── core/               Engine init, logging
+│   │   ├── platform/           SDL3 windowing
+│   │   ├── renderer/           Vulkan graphics
+│   │   └── resources/          Asset loading (textures, meshes)
+│   └── shaders/                GLSL shaders (compiled to SPIR-V at build time)
+├── sandbox/                    Test application
+├── assets/                     Game assets (textures, models)
+├── tests/                      Unit tests (placeholder)
+└── .vscode/                    VS Code launch + build tasks
 ```
+
+## Architecture
+
+```text
+┌─────────────────────────────────────────────┐
+│              Game / Application              │
+├─────────────────────────────────────────────┤
+│          Scene / World Management            │
+├──────────────┬──────────────┬───────────────┤
+│   Renderer   │    Audio     │    Physics    │
+├──────────────┴──────────────┴───────────────┤
+│           Resource / Asset System            │
+├─────────────────────────────────────────────┤
+│              Platform Layer                  │
+├─────────────────────────────────────────────┤
+│              Core / Foundation               │
+└─────────────────────────────────────────────┘
+```
+
+## Dependencies
+
+| Library       | Purpose          | Integration                 |
+| ------------- | ---------------- | --------------------------- |
+| SDL3          | Windowing, input | FetchContent (automatic)    |
+| Vulkan        | GPU rendering    | System install (Vulkan SDK) |
+| stb_image     | Image loading    | Single header, vendored     |
+| tinyobjloader | OBJ mesh loading | Single header, vendored     |
 
 ## License
 
