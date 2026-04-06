@@ -32,7 +32,7 @@ target_compile_options(kuma-engine PRIVATE
 find_program(GLSLC_EXECUTABLE glslc HINTS Vulkan::glslc)
 
 set(SHADER_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
-set(SHADER_OUTPUT_DIR ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/shaders)
+set(SHADER_OUTPUT_DIR ${CMAKE_BINARY_DIR}/shaders)
 
 # List every shader source file explicitly (no globbing — CMake best practice)
 set(SHADER_SOURCES
@@ -40,11 +40,10 @@ set(SHADER_SOURCES
     ${SHADER_SOURCE_DIR}/triangle.frag
 )
 
-# For each shader, add a custom command that compiles it to SPIR-V
+# For each shader, add a custom command that compiles it to SPIR-V.
+# Compiled shaders go to build/shaders/ (a stable, config-independent location).
 foreach(SHADER_SRC ${SHADER_SOURCES})
-    # Extract just the filename: "triangle.vert" from the full path
     get_filename_component(SHADER_NAME ${SHADER_SRC} NAME)
-
     set(SHADER_SPV ${SHADER_OUTPUT_DIR}/${SHADER_NAME}.spv)
 
     add_custom_command(
@@ -58,7 +57,9 @@ foreach(SHADER_SRC ${SHADER_SOURCES})
     list(APPEND SHADER_SPV_FILES ${SHADER_SPV})
 endforeach()
 
-# Custom target that depends on all compiled shaders.
-# kuma-engine depends on this, so shaders compile before the engine builds.
 add_custom_target(kuma-shaders DEPENDS ${SHADER_SPV_FILES})
 add_dependencies(kuma-engine kuma-shaders)
+
+# Make compiled shaders available as a CMake variable for downstream targets.
+# Executables linking kuma-engine can use this to copy shaders next to the exe.
+set(KUMA_SHADER_OUTPUT_DIR ${SHADER_OUTPUT_DIR} PARENT_SCOPE)

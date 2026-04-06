@@ -7,8 +7,45 @@
 #include <algorithm>
 #include <limits>
 #include <vector>
+#include <fstream>
+#include <array>
 
 namespace kuma {
+
+// ── File I/O ────────────────────────────────────────────────────
+// Reads a binary file (like compiled SPIR-V shaders) into a byte vector.
+// Returns an empty vector on failure.
+
+static std::vector<char> read_binary_file(const char* path) {
+    // ate = start at the end (so we can get the file size immediately)
+    // binary = don't translate line endings (critical for SPIR-V!)
+    std::ifstream file(path, std::ios::ate | std::ios::binary);
+
+    if (!file.is_open()) {
+        std::printf("[Kuma] Failed to open file: %s\n", path);
+        return {};
+    }
+
+    // tellg() gives us the position (= file size since we opened at the end)
+    auto file_size = file.tellg();
+    std::vector<char> buffer(static_cast<size_t>(file_size));
+
+    // Seek back to the beginning and read the whole file
+    file.seekg(0);
+    file.read(buffer.data(), file_size);
+
+    return buffer;
+}
+
+// ── Vertex Data ─────────────────────────────────────────────────
+// This struct must match the shader's input layout exactly.
+//   layout(location = 0) in vec2 in_position  →  position (offset 0)
+//   layout(location = 1) in vec3 in_color     →  color    (offset 8)
+
+struct Vertex {
+    float position[2];   // x, y  — clip space coordinates (-1 to +1)
+    float color[3];      // r, g, b
+};
 
 // ── Debug Messenger Callback ────────────────────────────────────
 // Vulkan validation layers call this when they detect an error.
@@ -45,6 +82,8 @@ private:
     bool create_swapchain();
     bool create_render_pass();
     bool create_framebuffers();
+    bool create_graphics_pipeline();
+    bool create_vertex_buffer();
     bool create_command_pool();
     bool create_command_buffers();
     bool create_sync_objects();
@@ -52,9 +91,11 @@ private:
     void destroy_swapchain();
     bool recreate_swapchain();
 
+    VkShaderModule create_shader_module(const std::vector<char>& code) const;
     VkSurfaceFormatKHR choose_surface_format() const;
     VkPresentModeKHR choose_present_mode() const;
     VkExtent2D choose_extent() const;
+    uint32_t find_memory_type(uint32_t type_filter, VkMemoryPropertyFlags properties) const;
 
     // Config
     SDL_Window* window_ = nullptr;
@@ -82,6 +123,14 @@ private:
     // Render pass and framebuffers
     VkRenderPass render_pass_ = VK_NULL_HANDLE;
     std::vector<VkFramebuffer> framebuffers_;
+
+    // Graphics pipeline
+    VkPipelineLayout pipeline_layout_ = VK_NULL_HANDLE;
+    VkPipeline graphics_pipeline_ = VK_NULL_HANDLE;
+
+    // Vertex buffer
+    VkBuffer vertex_buffer_ = VK_NULL_HANDLE;
+    VkDeviceMemory vertex_buffer_memory_ = VK_NULL_HANDLE;
 
     // Commands
     VkCommandPool command_pool_ = VK_NULL_HANDLE;
@@ -149,12 +198,14 @@ bool RendererImpl::init(const RendererConfig& config) {
     if (!create_surface())         return false;
     if (!pick_physical_device())   return false;
     if (!create_logical_device())  return false;
-    if (!create_swapchain())       return false;
-    if (!create_render_pass())     return false;
-    if (!create_framebuffers())    return false;
-    if (!create_command_pool())    return false;
-    if (!create_command_buffers()) return false;
-    if (!create_sync_objects())    return false;
+    if (!create_swapchain())          return false;
+    if (!create_render_pass())        return false;
+    if (!create_graphics_pipeline())  return false;
+    if (!create_framebuffers())       return false;
+    if (!create_vertex_buffer())      return false;
+    if (!create_command_pool())       return false;
+    if (!create_command_buffers())    return false;
+    if (!create_sync_objects())       return false;
 
     std::printf("[Kuma] Vulkan renderer initialized\n");
     return true;
@@ -174,7 +225,15 @@ void RendererImpl::shutdown() {
     }
 
     vkDestroyCommandPool(device_, command_pool_, nullptr);
+
+    if (vertex_buffer_ != VK_NULL_HANDLE) {
+        vkDestroyBuffer(device_, vertex_buffer_, nullptr);
+        vkFreeMemory(device_, vertex_buffer_memory_, nullptr);
+    }
+
     destroy_swapchain();
+    vkDestroyPipeline(device_, graphics_pipeline_, nullptr);
+    vkDestroyPipelineLayout(device_, pipeline_layout_, nullptr);
     vkDestroyRenderPass(device_, render_pass_, nullptr);
     vkDestroyDevice(device_, nullptr);
     vkDestroySurfaceKHR(instance_, surface_, nullptr);
@@ -530,6 +589,262 @@ bool RendererImpl::create_render_pass() {
     return true;
 }
 
+// ── Graphics Pipeline ──────────────────────────────────────────
+// The pipeline bundles everything needed to go from vertices to pixels:
+// shaders, vertex format, rasterization, blending, viewport, etc.
+// Once created, it's immutable — changing any setting means a new pipeline.
+
+bool RendererImpl::create_graphics_pipeline() {
+    // ── 1. Load compiled shaders ────────────────────────────────
+    auto vert_code = read_binary_file("shaders/triangle.vert.spv");
+    auto frag_code = read_binary_file("shaders/triangle.frag.spv");
+
+    if (vert_code.empty() || frag_code.empty()) {
+        std::printf("[Kuma] Failed to load shader files\n");
+        return false;
+    }
+
+    VkShaderModule vert_module = create_shader_module(vert_code);
+    VkShaderModule frag_module = create_shader_module(frag_code);
+
+    if (vert_module == VK_NULL_HANDLE || frag_module == VK_NULL_HANDLE) {
+        return false;
+    }
+
+    // ── 2. Shader stages ────────────────────────────────────────
+    // Tell the pipeline which shaders to use and at which stage.
+
+    VkPipelineShaderStageCreateInfo vert_stage{};
+    vert_stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    vert_stage.stage = VK_SHADER_STAGE_VERTEX_BIT;
+    vert_stage.module = vert_module;
+    vert_stage.pName = "main";   // entry point function name in the shader
+
+    VkPipelineShaderStageCreateInfo frag_stage{};
+    frag_stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    frag_stage.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    frag_stage.module = frag_module;
+    frag_stage.pName = "main";
+
+    std::array<VkPipelineShaderStageCreateInfo, 2> shader_stages = {
+        vert_stage, frag_stage
+    };
+
+    // ── 3. Vertex input ─────────────────────────────────────────
+    // Describes the layout of vertex data: how big is each vertex (stride),
+    // and where each attribute lives within that vertex (offset + format).
+
+    VkVertexInputBindingDescription binding_desc{};
+    binding_desc.binding = 0;                         // binding index (we only have one)
+    binding_desc.stride = sizeof(Vertex);             // 20 bytes per vertex
+    binding_desc.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;  // advance per vertex (not per instance)
+
+    std::array<VkVertexInputAttributeDescription, 2> attr_descs{};
+
+    // location 0 → position (vec2 = 2 floats)
+    attr_descs[0].binding = 0;
+    attr_descs[0].location = 0;
+    attr_descs[0].format = VK_FORMAT_R32G32_SFLOAT;         // vec2
+    attr_descs[0].offset = offsetof(Vertex, position);      // 0 bytes in
+
+    // location 1 → color (vec3 = 3 floats)
+    attr_descs[1].binding = 0;
+    attr_descs[1].location = 1;
+    attr_descs[1].format = VK_FORMAT_R32G32B32_SFLOAT;      // vec3
+    attr_descs[1].offset = offsetof(Vertex, color);          // 8 bytes in
+
+    VkPipelineVertexInputStateCreateInfo vertex_input{};
+    vertex_input.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    vertex_input.vertexBindingDescriptionCount = 1;
+    vertex_input.pVertexBindingDescriptions = &binding_desc;
+    vertex_input.vertexAttributeDescriptionCount = static_cast<uint32_t>(attr_descs.size());
+    vertex_input.pVertexAttributeDescriptions = attr_descs.data();
+
+    // ── 4. Input assembly ───────────────────────────────────────
+    // How to interpret the vertices: as triangles, lines, points, etc.
+
+    VkPipelineInputAssemblyStateCreateInfo input_assembly{};
+    input_assembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    input_assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    input_assembly.primitiveRestartEnable = VK_FALSE;
+
+    // ── 5. Dynamic state ────────────────────────────────────────
+    // Viewport and scissor will be set per-frame (not baked into pipeline).
+    // This means we don't need to recreate the pipeline on window resize.
+
+    std::array<VkDynamicState, 2> dynamic_states = {
+        VK_DYNAMIC_STATE_VIEWPORT,
+        VK_DYNAMIC_STATE_SCISSOR
+    };
+
+    VkPipelineDynamicStateCreateInfo dynamic_state{};
+    dynamic_state.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    dynamic_state.dynamicStateCount = static_cast<uint32_t>(dynamic_states.size());
+    dynamic_state.pDynamicStates = dynamic_states.data();
+
+    // We still declare that we have 1 viewport and 1 scissor, but their
+    // actual values come from vkCmdSetViewport/vkCmdSetScissor at draw time.
+    VkPipelineViewportStateCreateInfo viewport_state{};
+    viewport_state.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewport_state.viewportCount = 1;
+    viewport_state.scissorCount = 1;
+
+    // ── 6. Rasterizer ───────────────────────────────────────────
+    // Turns triangles into fragments (candidate pixels).
+
+    VkPipelineRasterizationStateCreateInfo rasterizer{};
+    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    rasterizer.depthClampEnable = VK_FALSE;         // don't clamp depth (discard instead)
+    rasterizer.rasterizerDiscardEnable = VK_FALSE;   // actually rasterize (VK_TRUE = skip)
+    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;   // fill triangles (LINE = wireframe)
+    rasterizer.lineWidth = 1.0f;
+    rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;     // cull back faces
+    rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;  // clockwise = front
+    rasterizer.depthBiasEnable = VK_FALSE;
+
+    // ── 7. Multisampling ────────────────────────────────────────
+    // Anti-aliasing. Disabled for now (1 sample per pixel).
+
+    VkPipelineMultisampleStateCreateInfo multisampling{};
+    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    multisampling.sampleShadingEnable = VK_FALSE;
+    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    // ── 8. Color blending ───────────────────────────────────────
+    // How to combine the fragment shader's output with what's already
+    // in the framebuffer. We just overwrite (no transparency).
+
+    VkPipelineColorBlendAttachmentState blend_attachment{};
+    blend_attachment.colorWriteMask =
+        VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+        VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    blend_attachment.blendEnable = VK_FALSE;   // no blending — just write the color
+
+    VkPipelineColorBlendStateCreateInfo color_blending{};
+    color_blending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    color_blending.logicOpEnable = VK_FALSE;
+    color_blending.attachmentCount = 1;
+    color_blending.pAttachments = &blend_attachment;
+
+    // ── 9. Pipeline layout ──────────────────────────────────────
+    // Describes uniform buffers, push constants, textures, etc.
+    // Empty for now — our shaders don't use any external data.
+
+    VkPipelineLayoutCreateInfo layout_info{};
+    layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+
+    VkResult result = vkCreatePipelineLayout(device_, &layout_info, nullptr, &pipeline_layout_);
+    if (result != VK_SUCCESS) {
+        std::printf("[Kuma] Failed to create pipeline layout\n");
+        vkDestroyShaderModule(device_, vert_module, nullptr);
+        vkDestroyShaderModule(device_, frag_module, nullptr);
+        return false;
+    }
+
+    // ── 10. Create the pipeline ─────────────────────────────────
+    // Finally, bundle everything into one immutable pipeline object.
+
+    VkGraphicsPipelineCreateInfo pipeline_info{};
+    pipeline_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pipeline_info.stageCount = static_cast<uint32_t>(shader_stages.size());
+    pipeline_info.pStages = shader_stages.data();
+    pipeline_info.pVertexInputState = &vertex_input;
+    pipeline_info.pInputAssemblyState = &input_assembly;
+    pipeline_info.pViewportState = &viewport_state;
+    pipeline_info.pRasterizationState = &rasterizer;
+    pipeline_info.pMultisampleState = &multisampling;
+    pipeline_info.pDepthStencilState = nullptr;       // no depth testing yet
+    pipeline_info.pColorBlendState = &color_blending;
+    pipeline_info.pDynamicState = &dynamic_state;
+    pipeline_info.layout = pipeline_layout_;
+    pipeline_info.renderPass = render_pass_;
+    pipeline_info.subpass = 0;                        // index of our subpass
+
+    result = vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE,
+        1, &pipeline_info, nullptr, &graphics_pipeline_);
+
+    // Shader modules are no longer needed — the pipeline has its own copy
+    vkDestroyShaderModule(device_, vert_module, nullptr);
+    vkDestroyShaderModule(device_, frag_module, nullptr);
+
+    if (result != VK_SUCCESS) {
+        std::printf("[Kuma] Failed to create graphics pipeline (error %d)\n", result);
+        return false;
+    }
+
+    std::printf("[Kuma] Graphics pipeline created\n");
+    return true;
+}
+
+// ── Vertex Buffer ──────────────────────────────────────────────
+// Upload triangle vertex data to GPU-accessible memory.
+
+bool RendererImpl::create_vertex_buffer() {
+    // Our triangle: 3 vertices with position (clip space) and color (RGB)
+    //
+    //        (0, -0.5) RED
+    //          /\
+    //         /  \
+    //        /    \
+    //       /______\
+    //  (-0.5,0.5)  (0.5,0.5)
+    //   GREEN       BLUE
+
+    const std::array<Vertex, 3> vertices = {{
+        {{ 0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},   // top center    — red
+        {{ 0.5f,  0.5f}, {0.0f, 0.0f, 1.0f}},   // bottom right  — blue
+        {{-0.5f,  0.5f}, {0.0f, 1.0f, 0.0f}},   // bottom left   — green
+    }};
+
+    VkDeviceSize buffer_size = sizeof(Vertex) * vertices.size();
+
+    // Step 1: Create the buffer object (just metadata — no memory yet)
+    VkBufferCreateInfo buffer_info{};
+    buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buffer_info.size = buffer_size;
+    buffer_info.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+    buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VkResult result = vkCreateBuffer(device_, &buffer_info, nullptr, &vertex_buffer_);
+    if (result != VK_SUCCESS) {
+        std::printf("[Kuma] Failed to create vertex buffer\n");
+        return false;
+    }
+
+    // Step 2: Find out what memory this buffer needs
+    VkMemoryRequirements mem_reqs;
+    vkGetBufferMemoryRequirements(device_, vertex_buffer_, &mem_reqs);
+
+    // Step 3: Allocate GPU memory
+    //   HOST_VISIBLE  = CPU can map and write to it
+    //   HOST_COHERENT = writes are immediately visible to GPU (no manual flush)
+    VkMemoryAllocateInfo alloc_info{};
+    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc_info.allocationSize = mem_reqs.size;
+    alloc_info.memoryTypeIndex = find_memory_type(mem_reqs.memoryTypeBits,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    result = vkAllocateMemory(device_, &alloc_info, nullptr, &vertex_buffer_memory_);
+    if (result != VK_SUCCESS) {
+        std::printf("[Kuma] Failed to allocate vertex buffer memory\n");
+        return false;
+    }
+
+    // Step 4: Bind the memory to the buffer
+    vkBindBufferMemory(device_, vertex_buffer_, vertex_buffer_memory_, 0);
+
+    // Step 5: Copy vertex data from CPU → GPU
+    //   vkMapMemory gives us a CPU-accessible pointer into GPU memory
+    void* data = nullptr;
+    vkMapMemory(device_, vertex_buffer_memory_, 0, buffer_size, 0, &data);
+    std::memcpy(data, vertices.data(), buffer_size);
+    vkUnmapMemory(device_, vertex_buffer_memory_);
+
+    std::printf("[Kuma] Vertex buffer created (%zu bytes, %zu vertices)\n",
+        static_cast<size_t>(buffer_size), vertices.size());
+    return true;
+}
+
 // ── Framebuffers ────────────────────────────────────────────────
 // Each framebuffer binds a swapchain image view to the render pass.
 
@@ -666,6 +981,37 @@ bool RendererImpl::begin_frame() {
 
     vkCmdBeginRenderPass(cmd, &rp_info, VK_SUBPASS_CONTENTS_INLINE);
 
+    // ── Draw commands ───────────────────────────────────────────
+
+    // Bind the graphics pipeline — "use these shaders and this configuration"
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline_);
+
+    // Set viewport — maps clip space (-1 to +1) to pixel coordinates.
+    // The minDepth/maxDepth range is the depth buffer range (0 to 1).
+    VkViewport viewport{};
+    viewport.x = 0.0f;
+    viewport.y = 0.0f;
+    viewport.width = static_cast<float>(swapchain_extent_.width);
+    viewport.height = static_cast<float>(swapchain_extent_.height);
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+    // Set scissor — clips pixels outside this rectangle.
+    // We set it to the full swapchain extent (no clipping).
+    VkRect2D scissor{};
+    scissor.offset = {0, 0};
+    scissor.extent = swapchain_extent_;
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+    // Bind the vertex buffer — "here's the triangle data"
+    VkBuffer buffers[] = {vertex_buffer_};
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(cmd, 0, 1, buffers, offsets);
+
+    // Draw! 3 vertices, 1 instance, starting at vertex 0, instance 0.
+    vkCmdDraw(cmd, 3, 1, 0, 0);
+
     return true;
 }
 
@@ -716,6 +1062,52 @@ void RendererImpl::on_resize(int32_t width, int32_t height) {
 }
 
 // ── Helpers ─────────────────────────────────────────────────────
+
+// Creates a VkShaderModule from compiled SPIR-V bytecode.
+// The module is a thin wrapper — Vulkan copies the data internally,
+// so the source vector can be freed after this call.
+
+VkShaderModule RendererImpl::create_shader_module(const std::vector<char>& code) const {
+    VkShaderModuleCreateInfo create_info{};
+    create_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    create_info.codeSize = code.size();
+    // SPIR-V expects uint32_t* but we have char*. reinterpret_cast is safe
+    // here because SPIR-V data is always 4-byte aligned (the spec requires it).
+    create_info.pCode = reinterpret_cast<const uint32_t*>(code.data());
+
+    VkShaderModule shader_module = VK_NULL_HANDLE;
+    VkResult result = vkCreateShaderModule(device_, &create_info, nullptr, &shader_module);
+    if (result != VK_SUCCESS) {
+        std::printf("[Kuma] Failed to create shader module\n");
+        return VK_NULL_HANDLE;
+    }
+
+    return shader_module;
+}
+
+// Finds a GPU memory type that satisfies both the buffer's requirements
+// and our desired properties (e.g., host-visible for CPU access).
+
+uint32_t RendererImpl::find_memory_type(uint32_t type_filter,
+    VkMemoryPropertyFlags properties) const
+{
+    VkPhysicalDeviceMemoryProperties mem_props;
+    vkGetPhysicalDeviceMemoryProperties(physical_device_, &mem_props);
+
+    for (uint32_t i = 0; i < mem_props.memoryTypeCount; i++) {
+        // type_filter is a bitmask — bit i is set if memory type i is suitable
+        bool type_suitable = (type_filter & (1 << i)) != 0;
+        // Check that this memory type has ALL the properties we need
+        bool has_properties = (mem_props.memoryTypes[i].propertyFlags & properties) == properties;
+
+        if (type_suitable && has_properties) {
+            return i;
+        }
+    }
+
+    std::printf("[Kuma] Failed to find suitable memory type\n");
+    return 0;
+}
 
 VkSurfaceFormatKHR RendererImpl::choose_surface_format() const {
     uint32_t count = 0;
