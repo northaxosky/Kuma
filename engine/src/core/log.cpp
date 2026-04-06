@@ -14,9 +14,9 @@ namespace kuma::log {
 // ── State ───────────────────────────────────────────────────────
 
 #ifdef NDEBUG
-static Level s_min_level = Level::info;     // release: skip trace
+static Level s_min_level = Level::Info;     // release: skip trace
 #else
-static Level s_min_level = Level::trace;    // debug: show everything
+static Level s_min_level = Level::Trace;    // debug: show everything
 #endif
 
 // ── ANSI Color Codes ────────────────────────────────────────────
@@ -63,10 +63,10 @@ static void log_message(Level level, const char* fmt, va_list args) {
     const char* label = "info";
 
     switch (level) {
-        case Level::trace: color = COLOR_TRACE; label = "trace"; break;
-        case Level::info:  color = COLOR_INFO;  label = "info";  break;
-        case Level::warn:  color = COLOR_WARN;  label = "warn";  break;
-        case Level::error: color = COLOR_ERROR; label = "error"; break;
+        case Level::Trace: color = COLOR_TRACE; label = "trace"; break;
+        case Level::Info:  color = COLOR_INFO;  label = "info";  break;
+        case Level::Warn:  color = COLOR_WARN;  label = "warn";  break;
+        case Level::Error: color = COLOR_ERROR; label = "error"; break;
     }
 
     // Print: [Kuma][level] message
@@ -84,28 +84,28 @@ void set_level(Level level) {
 void trace(const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);
-    log_message(Level::trace, fmt, args);
+    log_message(Level::Trace, fmt, args);
     va_end(args);
 }
 
 void info(const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);
-    log_message(Level::info, fmt, args);
+    log_message(Level::Info, fmt, args);
     va_end(args);
 }
 
 void warn(const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);
-    log_message(Level::warn, fmt, args);
+    log_message(Level::Warn, fmt, args);
     va_end(args);
 }
 
 void error(const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);
-    log_message(Level::error, fmt, args);
+    log_message(Level::Error, fmt, args);
     va_end(args);
 }
 

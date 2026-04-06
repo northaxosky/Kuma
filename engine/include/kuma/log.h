@@ -13,10 +13,10 @@
 namespace kuma::log {
 
 enum class Level {
-    trace,
-    info,
-    warn,
-    error
+    Trace,
+    Info,
+    Warn,
+    Error
 };
 
 // Set the minimum level — messages below this are ignored.
