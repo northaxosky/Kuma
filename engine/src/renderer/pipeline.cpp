@@ -174,10 +174,18 @@ bool RendererImpl::create_graphics_pipeline() {
         return false;
     }
 
+    // Push constant range: 64 bytes (one mat4) accessible from vertex shader
+    VkPushConstantRange push_range{};
+    push_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    push_range.offset = 0;
+    push_range.size = sizeof(float) * 16;   // mat4 = 16 floats = 64 bytes
+
     VkPipelineLayoutCreateInfo layout_info{};
     layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     layout_info.setLayoutCount = 1;
     layout_info.pSetLayouts = &descriptor_set_layout_;
+    layout_info.pushConstantRangeCount = 1;
+    layout_info.pPushConstantRanges = &push_range;
 
     VkResult result = vkCreatePipelineLayout(device_, &layout_info, nullptr, &pipeline_layout_);
     if (result != VK_SUCCESS) {
