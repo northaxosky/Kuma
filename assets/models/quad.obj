@@ -1,18 +1,16 @@
 # Simple quad mesh for testing
 # 4 vertices, 2 triangles
+# 1x1 unit square centered at origin (model space)
 
-# Positions (clip space, same as our hardcoded quad)
-v -0.281 -0.5 0.0
-v  0.281 -0.5 0.0
-v -0.281  0.5 0.0
-v  0.281  0.5 0.0
+v -0.5 -0.5 0.0
+v  0.5 -0.5 0.0
+v -0.5  0.5 0.0
+v  0.5  0.5 0.0
 
-# Texture coordinates
 vt 0.0 0.0
 vt 1.0 0.0
 vt 0.0 1.0
 vt 1.0 1.0
 
-# Faces (vertex/texcoord)
 f 1/1 2/2 3/3
 f 3/3 2/2 4/4

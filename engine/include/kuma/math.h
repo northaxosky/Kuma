@@ -99,12 +99,15 @@ struct Mat4 {
     static Mat4 perspective(float fov_radians, float aspect, float near, float far) {
         float tan_half_fov = std::tan(fov_radians / 2.0f);
 
+        // Right-handed, looking down -Z. Objects in front of the camera
+        // have negative z in view space, so we negate m(3,2) to make
+        // w_clip positive (required for correct clipping).
         Mat4 m{};
         m(0, 0) = 1.0f / (aspect * tan_half_fov);
-        m(1, 1) = -1.0f / tan_half_fov;      // negative = flip Y for Vulkan
-        m(2, 2) = far / (far - near);          // maps z to 0..1 range
-        m(2, 3) = -(far * near) / (far - near);
-        m(3, 2) = 1.0f;                        // perspective divide (w = z)
+        m(1, 1) = -1.0f / tan_half_fov;           // flip Y for Vulkan
+        m(2, 2) = far / (near - far);              // maps z to 0..1 (reversed for -Z)
+        m(2, 3) = (far * near) / (near - far);
+        m(3, 2) = -1.0f;                           // w_clip = -z_view (positive for -Z)
         return m;
     }
 
@@ -113,18 +116,21 @@ struct Mat4 {
     //   target: what the camera is looking at
     //   up:     which direction is "up" (usually 0,1,0)
     static Mat4 look_at(const Vec3& eye, const Vec3& target, const Vec3& up) {
-        Vec3 forward = normalize(target - eye);    // camera's forward direction
-        Vec3 right = normalize(cross(forward, up));  // camera's right direction
-        Vec3 cam_up = cross(right, forward);          // camera's true up
+        Vec3 forward = normalize(target - eye);         // camera looks this way
+        Vec3 right = normalize(cross(forward, up));     // camera's right
+        Vec3 cam_up = cross(right, forward);            // camera's true up
 
+        // The view matrix uses -forward for the Z row because the camera
+        // looks down -Z in Vulkan/OpenGL convention. Without the negation,
+        // the image flips vertically.
         Mat4 m = identity();
-        m(0, 0) = right.x;     m(0, 1) = right.y;     m(0, 2) = right.z;
-        m(1, 0) = cam_up.x;    m(1, 1) = cam_up.y;    m(1, 2) = cam_up.z;
-        m(2, 0) = forward.x;   m(2, 1) = forward.y;   m(2, 2) = forward.z;
+        m(0, 0) =  right.x;    m(0, 1) =  right.y;    m(0, 2) =  right.z;
+        m(1, 0) =  cam_up.x;   m(1, 1) =  cam_up.y;   m(1, 2) =  cam_up.z;
+        m(2, 0) = -forward.x;  m(2, 1) = -forward.y;  m(2, 2) = -forward.z;
 
         m(0, 3) = -dot(right, eye);
         m(1, 3) = -dot(cam_up, eye);
-        m(2, 3) = -dot(forward, eye);
+        m(2, 3) =  dot(forward, eye);
 
         return m;
     }

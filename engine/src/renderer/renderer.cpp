@@ -167,9 +167,17 @@ bool RendererImpl::begin_frame() {
     // Draw commands
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline_);
 
-    // Push MVP matrix to the vertex shader.
-    // Identity for now — no transformation (same as before).
-    Mat4 mvp = Mat4::identity();
+    // Build the MVP matrix.
+    float aspect = static_cast<float>(swapchain_extent_.width)
+                 / static_cast<float>(swapchain_extent_.height);
+
+    Mat4 model = Mat4::identity();
+    Mat4 view = Mat4::look_at({0.0f, 0.0f, 2.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f});
+    Mat4 projection = Mat4::perspective(0.785f, aspect, 0.1f, 100.0f);
+
+    // projection * view * model: model transforms first, then view, then project
+    Mat4 mvp = projection * view * model;
+
     vkCmdPushConstants(cmd, pipeline_layout_,
         VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(Mat4), mvp.ptr());
 

@@ -421,7 +421,8 @@ const Mesh* ResourceManager::Impl::load_mesh(const char* path) {
             // UV: attrib.texcoords stores [u0, v0, u1, v1, ...]
             if (index.texcoord_index >= 0) {
                 vertex.uv[0] = attrib.texcoords[2 * index.texcoord_index + 0];
-                vertex.uv[1] = attrib.texcoords[2 * index.texcoord_index + 1];
+                // OBJ has V=0 at bottom, Vulkan has V=0 at top — flip it
+                vertex.uv[1] = 1.0f - attrib.texcoords[2 * index.texcoord_index + 1];
             }
 
             indices.push_back(static_cast<uint16_t>(vertices.size()));
