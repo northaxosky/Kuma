@@ -63,10 +63,10 @@ static void log_message(Level level, const char* fmt, va_list args) {
     const char* label = "info";
 
     switch (level) {
-        case Level::Trace: color = COLOR_TRACE; label = "trace"; break;
-        case Level::Info:  color = COLOR_INFO;  label = "info";  break;
-        case Level::Warn:  color = COLOR_WARN;  label = "warn";  break;
-        case Level::Error: color = COLOR_ERROR; label = "error"; break;
+        case Level::Trace: color = COLOR_TRACE; label = "Trace"; break;
+        case Level::Info:  color = COLOR_INFO;  label = "Info";  break;
+        case Level::Warn:  color = COLOR_WARN;  label = "Warn";  break;
+        case Level::Error: color = COLOR_ERROR; label = "Error"; break;
     }
 
     // Print: [Kuma][level] message
