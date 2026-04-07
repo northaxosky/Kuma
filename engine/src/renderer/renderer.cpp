@@ -3,6 +3,7 @@
 // per-frame rendering loop. The thin entry point into the renderer.
 
 #include "renderer_impl.h"
+#include <kuma/math.h>
 
 namespace kuma {
 
@@ -165,6 +166,12 @@ bool RendererImpl::begin_frame() {
 
     // Draw commands
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline_);
+
+    // Push MVP matrix to the vertex shader.
+    // Identity for now — no transformation (same as before).
+    Mat4 mvp = Mat4::identity();
+    vkCmdPushConstants(cmd, pipeline_layout_,
+        VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(Mat4), mvp.ptr());
 
     VkViewport viewport{};
     viewport.x = 0.0f;
