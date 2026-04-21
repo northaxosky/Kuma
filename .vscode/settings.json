@@ -3,6 +3,13 @@
     "C_Cpp.formatting": "clangFormat",
     "C_Cpp.clang_format_style": "file",
 
+    // Editor indent settings — pinned so every contributor sees the same
+    // indent guides and tab behavior regardless of their global settings.
+    // Matches IndentWidth: 4 in .clang-format.
+    "editor.tabSize": 4,
+    "editor.insertSpaces": true,
+    "editor.detectIndentation": false,
+
     // Auto-format C/C++ files on save so .clang-format is always applied.
     "[cpp]": {
         "editor.defaultFormatter": "ms-vscode.cpptools",
