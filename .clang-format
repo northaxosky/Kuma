@@ -1,0 +1,59 @@
+# Kuma Engine — clang-format config
+# Based on LLVM style with tweaks for a modern C++ game engine codebase.
+# Run `clang-format -i <file>` manually, or let VS Code format on save.
+
+BasedOnStyle: LLVM
+
+# ── Layout ─────────────────────────────────────────────────────────
+IndentWidth:       4
+TabWidth:          4
+UseTab:            Never
+ColumnLimit:       100
+
+# ── Braces ─────────────────────────────────────────────────────────
+# K&R / "Attach" style — opening brace on the same line as the declaration.
+BreakBeforeBraces: Attach
+
+# ── Pointers & References ──────────────────────────────────────────
+# `int* p` and `int& r` — type-centric, matches existing codebase.
+PointerAlignment:  Left
+ReferenceAlignment: Left
+
+# ── Access modifiers ───────────────────────────────────────────────
+# Dedent `public:` / `private:` by one level so they sit flush with `class`.
+AccessModifierOffset: -4
+
+# ── Namespaces ─────────────────────────────────────────────────────
+# Don't add another indent level inside a namespace (avoids deep staircases
+# like kuma::renderer::detail::...). clang-format will also auto-add
+# trailing `// namespace foo` comments on the closing brace.
+NamespaceIndentation: None
+FixNamespaceComments: true
+
+# ── Short constructs ───────────────────────────────────────────────
+# Allow trivial one-liners like `int size() const { return n; }` to stay on
+# one line, but force anything larger onto multiple lines.
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine:        false
+AllowShortCaseLabelsOnASingleLine:   false
+
+# ── Includes ───────────────────────────────────────────────────────
+# Group and sort #includes automatically. Order:
+#   1. The matching header for this .cpp (e.g. window.cpp -> window.h)
+#   2. Project headers <kuma/...>
+#   3. Third-party / system headers
+SortIncludes: CaseSensitive
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex:    '^<kuma/'
+    Priority: 2
+  - Regex:    '^".*"'
+    Priority: 3
+  - Regex:    '^<.*>'
+    Priority: 4
+
+# ── Misc ───────────────────────────────────────────────────────────
+SortUsingDeclarations: true
+SpaceAfterTemplateKeyword: true
+SpacesBeforeTrailingComments: 2
