@@ -13,13 +13,14 @@ Kuma is designed for small, indie games — prioritizing simplicity, modularity,
 - **Vulkan renderer** — graphics pipeline, textured quads, shader compilation
 - **SDL3 platform layer** — windowing, event loop, resize handling
 - **Resource system** — load textures (PNG/JPG) and meshes (OBJ) from disk with caching
+- **Math** — Vec3, Mat4, and MVP matrix helpers
+- **MVP pipeline** — perspective camera, push-constant model-view-projection in the quad shader
 - **Logging** — severity levels, colored console output
 
 ### What's Next
 
-- Scene graph / ECS
 - Input system (keyboard, mouse)
-- MVP matrices (3D rendering)
+- Scene graph / ECS
 - Audio, physics
 
 ## Building
