@@ -19,7 +19,6 @@ target/
 
 # IDE
 .vs/
-.vscode/settings.json
 *.user
 *.suo
 
