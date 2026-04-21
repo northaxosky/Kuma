@@ -40,5 +40,6 @@ if(KUMA_BUILD_SANDBOX)
 endif()
 
 if(KUMA_BUILD_TESTS)
+    enable_testing()
     add_subdirectory(tests)
 endif()
