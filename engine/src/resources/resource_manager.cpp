@@ -2,24 +2,24 @@
 // Loads, caches, and manages GPU resources (textures, meshes).
 // Owns a GPU context (device, queue, etc.) to upload data to the GPU.
 
-#include <kuma/resource_manager.h>
 #include <kuma/log.h>
-#include <vulkan/vulkan.h>
+#include <kuma/resource_manager.h>
+
+#include <array>
 #include <cstdio>
 #include <cstring>
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include <array>
+#include <vulkan/vulkan.h>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "../renderer/stb_image.h"
 
 #define TINYOBJLOADER_DISABLE_FAST_FLOAT
 #define TINYOBJLOADER_IMPLEMENTATION
-#include "tiny_obj_loader.h"
-
 #include "../renderer/renderer_impl.h"
+#include "tiny_obj_loader.h"
 
 namespace kuma {
 
@@ -67,14 +67,11 @@ public:
     std::unordered_map<std::string, Mesh> mesh_cache_;
 
 private:
-    uint32_t find_memory_type(uint32_t type_filter,
-        VkMemoryPropertyFlags properties) const;
+    uint32_t find_memory_type(uint32_t type_filter, VkMemoryPropertyFlags properties) const;
     VkCommandBuffer begin_single_command() const;
     void end_single_command(VkCommandBuffer cmd) const;
-    void transition_image_layout(VkImage image,
-        VkImageLayout old_layout, VkImageLayout new_layout);
-    void copy_buffer_to_image(VkBuffer buffer, VkImage image,
-        uint32_t width, uint32_t height);
+    void transition_image_layout(VkImage image, VkImageLayout old_layout, VkImageLayout new_layout);
+    void copy_buffer_to_image(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
 };
 
 // ── Public wrapper ──────────────────────────────────────────────
@@ -111,9 +108,8 @@ const Mesh* ResourceManager::load_mesh(const char* path) {
 // These are the same functions from resources.cpp, but taking explicit
 // parameters instead of reading RendererImpl member variables.
 
-uint32_t ResourceManager::Impl::find_memory_type(
-    uint32_t type_filter, VkMemoryPropertyFlags properties) const
-{
+uint32_t ResourceManager::Impl::find_memory_type(uint32_t type_filter,
+                                                 VkMemoryPropertyFlags properties) const {
     VkPhysicalDeviceMemoryProperties mem_props;
     vkGetPhysicalDeviceMemoryProperties(gpu_.physical_device, &mem_props);
 
@@ -130,8 +126,7 @@ uint32_t ResourceManager::Impl::find_memory_type(
     return 0;
 }
 
-VkCommandBuffer ResourceManager::Impl::begin_single_command() const
-{
+VkCommandBuffer ResourceManager::Impl::begin_single_command() const {
     VkCommandBufferAllocateInfo alloc_info{};
     alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     alloc_info.commandPool = gpu_.command_pool;
@@ -149,8 +144,7 @@ VkCommandBuffer ResourceManager::Impl::begin_single_command() const
     return cmd;
 }
 
-void ResourceManager::Impl::end_single_command(VkCommandBuffer cmd) const
-{
+void ResourceManager::Impl::end_single_command(VkCommandBuffer cmd) const {
     vkEndCommandBuffer(cmd);
 
     VkSubmitInfo submit_info{};
@@ -164,8 +158,8 @@ void ResourceManager::Impl::end_single_command(VkCommandBuffer cmd) const
     vkFreeCommandBuffers(gpu_.device, gpu_.command_pool, 1, &cmd);
 }
 
-void ResourceManager::Impl::transition_image_layout(VkImage image, VkImageLayout old_layout, VkImageLayout new_layout)
-{
+void ResourceManager::Impl::transition_image_layout(VkImage image, VkImageLayout old_layout,
+                                                    VkImageLayout new_layout) {
     VkCommandBuffer cmd = begin_single_command();
 
     VkImageMemoryBarrier barrier{};
@@ -202,15 +196,13 @@ void ResourceManager::Impl::transition_image_layout(VkImage image, VkImageLayout
         return;
     }
 
-    vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0,
-        0, nullptr, 0, nullptr, 1, &barrier);
+    vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
     end_single_command(cmd);
 }
 
-void ResourceManager::Impl::copy_buffer_to_image(
-    VkBuffer buffer, VkImage image, uint32_t width, uint32_t height)
-{
+void ResourceManager::Impl::copy_buffer_to_image(VkBuffer buffer, VkImage image, uint32_t width,
+                                                 uint32_t height) {
     VkCommandBuffer cmd = begin_single_command();
 
     VkBufferImageCopy region{};
@@ -224,16 +216,14 @@ void ResourceManager::Impl::copy_buffer_to_image(
     region.imageOffset = {0, 0, 0};
     region.imageExtent = {width, height, 1};
 
-    vkCmdCopyBufferToImage(cmd, buffer, image,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+    vkCmdCopyBufferToImage(cmd, buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
     end_single_command(cmd);
 }
 
 // ── Texture Loading ─────────────────────────────────────────────
 
-const Texture* ResourceManager::Impl::load_texture(const char* path)
-{
+const Texture* ResourceManager::Impl::load_texture(const char* path) {
     // Check cache first
     auto it = texture_cache_.find(path);
     if (it != texture_cache_.end()) {
@@ -271,8 +261,9 @@ const Texture* ResourceManager::Impl::load_texture(const char* path)
     VkMemoryAllocateInfo alloc_info{};
     alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     alloc_info.allocationSize = mem_reqs.size;
-    alloc_info.memoryTypeIndex = find_memory_type(mem_reqs.memoryTypeBits,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    alloc_info.memoryTypeIndex =
+        find_memory_type(mem_reqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                                      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
     vkAllocateMemory(gpu_.device, &alloc_info, nullptr, &staging_memory);
     vkBindBufferMemory(gpu_.device, staging_buffer, staging_memory, 0);
@@ -310,23 +301,21 @@ const Texture* ResourceManager::Impl::load_texture(const char* path)
     vkGetImageMemoryRequirements(gpu_.device, texture.image, &mem_reqs);
 
     alloc_info.allocationSize = mem_reqs.size;
-    alloc_info.memoryTypeIndex = find_memory_type(mem_reqs.memoryTypeBits,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    alloc_info.memoryTypeIndex =
+        find_memory_type(mem_reqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
     vkAllocateMemory(gpu_.device, &alloc_info, nullptr, &texture.memory);
     vkBindImageMemory(gpu_.device, texture.image, texture.memory, 0);
 
     // Transfer
-    transition_image_layout(texture.image,
-        VK_IMAGE_LAYOUT_UNDEFINED,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    transition_image_layout(texture.image, VK_IMAGE_LAYOUT_UNDEFINED,
+                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
-    copy_buffer_to_image(staging_buffer, texture.image,
-        static_cast<uint32_t>(tex_width), static_cast<uint32_t>(tex_height));
+    copy_buffer_to_image(staging_buffer, texture.image, static_cast<uint32_t>(tex_width),
+                         static_cast<uint32_t>(tex_height));
 
-    transition_image_layout(texture.image,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    transition_image_layout(texture.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
     vkDestroyBuffer(gpu_.device, staging_buffer, nullptr);
     vkFreeMemory(gpu_.device, staging_memory, nullptr);
@@ -452,8 +441,9 @@ const Mesh* ResourceManager::Impl::load_mesh(const char* path) {
     VkMemoryAllocateInfo alloc_info{};
     alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     alloc_info.allocationSize = mem_reqs.size;
-    alloc_info.memoryTypeIndex = find_memory_type(mem_reqs.memoryTypeBits,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    alloc_info.memoryTypeIndex =
+        find_memory_type(mem_reqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                                      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
     vkAllocateMemory(gpu_.device, &alloc_info, nullptr, &mesh.vertex_memory);
     vkBindBufferMemory(gpu_.device, mesh.vertex_buffer, mesh.vertex_memory, 0);
@@ -475,8 +465,9 @@ const Mesh* ResourceManager::Impl::load_mesh(const char* path) {
     vkGetBufferMemoryRequirements(gpu_.device, mesh.index_buffer, &mem_reqs);
 
     alloc_info.allocationSize = mem_reqs.size;
-    alloc_info.memoryTypeIndex = find_memory_type(mem_reqs.memoryTypeBits,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    alloc_info.memoryTypeIndex =
+        find_memory_type(mem_reqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                                      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
     vkAllocateMemory(gpu_.device, &alloc_info, nullptr, &mesh.index_memory);
     vkBindBufferMemory(gpu_.device, mesh.index_buffer, mesh.index_memory, 0);
@@ -485,11 +476,11 @@ const Mesh* ResourceManager::Impl::load_mesh(const char* path) {
     std::memcpy(data, indices.data(), index_size);
     vkUnmapMemory(gpu_.device, mesh.index_memory);
 
-    kuma::log::info("Mesh loaded: %s (%zu vertices, %u indices)",
-        path, vertices.size(), mesh.index_count);
+    kuma::log::info("Mesh loaded: %s (%zu vertices, %u indices)", path, vertices.size(),
+                    mesh.index_count);
 
     auto [inserted, _] = mesh_cache_.emplace(path, mesh);
     return &inserted->second;
 }
 
-} // namespace kuma
+}  // namespace kuma

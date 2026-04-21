@@ -48,4 +48,4 @@ private:
     RendererImpl* impl_ = nullptr;
 };
 
-} // namespace kuma
+}  // namespace kuma

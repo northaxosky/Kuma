@@ -50,4 +50,4 @@ private:
     ResizeCallback resize_callback_;
 };
 
-} // namespace kuma
+}  // namespace kuma

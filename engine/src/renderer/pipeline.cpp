@@ -73,9 +73,7 @@ bool RendererImpl::create_graphics_pipeline() {
     frag_stage.module = frag_module;
     frag_stage.pName = "main";
 
-    std::array<VkPipelineShaderStageCreateInfo, 2> shader_stages = {
-        vert_stage, frag_stage
-    };
+    std::array<VkPipelineShaderStageCreateInfo, 2> shader_stages = {vert_stage, frag_stage};
 
     // Vertex input
     VkVertexInputBindingDescription binding_desc{};
@@ -109,10 +107,8 @@ bool RendererImpl::create_graphics_pipeline() {
     input_assembly.primitiveRestartEnable = VK_FALSE;
 
     // Dynamic state
-    std::array<VkDynamicState, 2> dynamic_states = {
-        VK_DYNAMIC_STATE_VIEWPORT,
-        VK_DYNAMIC_STATE_SCISSOR
-    };
+    std::array<VkDynamicState, 2> dynamic_states = {VK_DYNAMIC_STATE_VIEWPORT,
+                                                    VK_DYNAMIC_STATE_SCISSOR};
 
     VkPipelineDynamicStateCreateInfo dynamic_state{};
     dynamic_state.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
@@ -143,9 +139,8 @@ bool RendererImpl::create_graphics_pipeline() {
 
     // Color blending
     VkPipelineColorBlendAttachmentState blend_attachment{};
-    blend_attachment.colorWriteMask =
-        VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-        VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    blend_attachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                                      VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
     blend_attachment.blendEnable = VK_FALSE;
 
     VkPipelineColorBlendStateCreateInfo color_blending{};
@@ -167,7 +162,7 @@ bool RendererImpl::create_graphics_pipeline() {
     layout_binding_info.pBindings = &sampler_binding;
 
     if (vkCreateDescriptorSetLayout(device_, &layout_binding_info, nullptr,
-            &descriptor_set_layout_) != VK_SUCCESS) {
+                                    &descriptor_set_layout_) != VK_SUCCESS) {
         kuma::log::error("Failed to create descriptor set layout");
         vkDestroyShaderModule(device_, vert_module, nullptr);
         vkDestroyShaderModule(device_, frag_module, nullptr);
@@ -178,7 +173,7 @@ bool RendererImpl::create_graphics_pipeline() {
     VkPushConstantRange push_range{};
     push_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
     push_range.offset = 0;
-    push_range.size = sizeof(float) * 16;   // mat4 = 16 floats = 64 bytes
+    push_range.size = sizeof(float) * 16;  // mat4 = 16 floats = 64 bytes
 
     VkPipelineLayoutCreateInfo layout_info{};
     layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -212,8 +207,8 @@ bool RendererImpl::create_graphics_pipeline() {
     pipeline_info.renderPass = render_pass_;
     pipeline_info.subpass = 0;
 
-    result = vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE,
-        1, &pipeline_info, nullptr, &graphics_pipeline_);
+    result = vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &pipeline_info, nullptr,
+                                       &graphics_pipeline_);
 
     vkDestroyShaderModule(device_, vert_module, nullptr);
     vkDestroyShaderModule(device_, frag_module, nullptr);
@@ -227,4 +222,4 @@ bool RendererImpl::create_graphics_pipeline() {
     return true;
 }
 
-} // namespace kuma
+}  // namespace kuma

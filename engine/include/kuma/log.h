@@ -12,12 +12,7 @@
 
 namespace kuma::log {
 
-enum class Level {
-    Trace,
-    Info,
-    Warn,
-    Error
-};
+enum class Level { Trace, Info, Warn, Error };
 
 // Set the minimum level — messages below this are ignored.
 // Default is trace (show everything) in debug, info in release.
@@ -30,4 +25,4 @@ void info(const char* fmt, ...);
 void warn(const char* fmt, ...);
 void error(const char* fmt, ...);
 
-} // namespace kuma::log
+}  // namespace kuma::log

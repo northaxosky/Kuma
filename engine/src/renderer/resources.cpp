@@ -44,9 +44,8 @@ void RendererImpl::end_single_command(VkCommandBuffer cmd) const {
 
 // ── Image Layout Transitions ───────────────────────────────────
 
-void RendererImpl::transition_image_layout(VkImage image,
-    VkImageLayout old_layout, VkImageLayout new_layout)
-{
+void RendererImpl::transition_image_layout(VkImage image, VkImageLayout old_layout,
+                                           VkImageLayout new_layout) {
     VkCommandBuffer cmd = begin_single_command();
 
     VkImageMemoryBarrier barrier{};
@@ -83,17 +82,15 @@ void RendererImpl::transition_image_layout(VkImage image,
         return;
     }
 
-    vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0,
-        0, nullptr, 0, nullptr, 1, &barrier);
+    vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
     end_single_command(cmd);
 }
 
 // ── Buffer-to-Image Copy ───────────────────────────────────────
 
-void RendererImpl::copy_buffer_to_image(VkBuffer buffer, VkImage image,
-    uint32_t width, uint32_t height)
-{
+void RendererImpl::copy_buffer_to_image(VkBuffer buffer, VkImage image, uint32_t width,
+                                        uint32_t height) {
     VkCommandBuffer cmd = begin_single_command();
 
     VkBufferImageCopy region{};
@@ -107,8 +104,7 @@ void RendererImpl::copy_buffer_to_image(VkBuffer buffer, VkImage image,
     region.imageOffset = {0, 0, 0};
     region.imageExtent = {width, height, 1};
 
-    vkCmdCopyBufferToImage(cmd, buffer, image,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+    vkCmdCopyBufferToImage(cmd, buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
     end_single_command(cmd);
 }
@@ -219,7 +215,8 @@ bool RendererImpl::create_sync_objects() {
     fence_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
     for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        if (vkCreateSemaphore(device_, &sem_info, nullptr, &image_available_semaphores_[i]) != VK_SUCCESS ||
+        if (vkCreateSemaphore(device_, &sem_info, nullptr, &image_available_semaphores_[i]) !=
+                VK_SUCCESS ||
             vkCreateFence(device_, &fence_info, nullptr, &in_flight_fences_[i]) != VK_SUCCESS) {
             kuma::log::error("Failed to create sync objects");
             return false;
@@ -227,7 +224,8 @@ bool RendererImpl::create_sync_objects() {
     }
 
     for (uint32_t i = 0; i < image_count; i++) {
-        if (vkCreateSemaphore(device_, &sem_info, nullptr, &render_finished_semaphores_[i]) != VK_SUCCESS) {
+        if (vkCreateSemaphore(device_, &sem_info, nullptr, &render_finished_semaphores_[i]) !=
+            VK_SUCCESS) {
             kuma::log::error("Failed to create render finished semaphore");
             return false;
         }
@@ -239,8 +237,7 @@ bool RendererImpl::create_sync_objects() {
 // ── Memory Helpers ──────────────────────────────────────────────
 
 uint32_t RendererImpl::find_memory_type(uint32_t type_filter,
-    VkMemoryPropertyFlags properties) const
-{
+                                        VkMemoryPropertyFlags properties) const {
     VkPhysicalDeviceMemoryProperties mem_props;
     vkGetPhysicalDeviceMemoryProperties(physical_device_, &mem_props);
 
@@ -257,4 +254,4 @@ uint32_t RendererImpl::find_memory_type(uint32_t type_filter,
     return 0;
 }
 
-} // namespace kuma
+}  // namespace kuma

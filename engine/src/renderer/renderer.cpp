@@ -2,8 +2,9 @@
 // Public Renderer wrapper, init/shutdown orchestration, and the
 // per-frame rendering loop. The thin entry point into the renderer.
 
-#include "renderer_impl.h"
 #include <kuma/math.h>
+
+#include "renderer_impl.h"
 
 namespace kuma {
 
@@ -70,25 +71,38 @@ bool RendererImpl::init(const RendererConfig& config) {
     height_ = config.height;
     validation_enabled_ = config.enable_validation;
 
-    if (!create_instance())           return false;
-    if (!create_debug_messenger())    return false;
-    if (!create_surface())            return false;
-    if (!pick_physical_device())      return false;
-    if (!create_logical_device())     return false;
-    if (!create_swapchain())          return false;
-    if (!create_render_pass())        return false;
-    if (!create_graphics_pipeline())  return false;
-    if (!create_framebuffers())       return false;
-    if (!create_command_pool())       return false;
-    if (!create_command_buffers())    return false;
-    if (!create_sync_objects())       return false;
+    if (!create_instance())
+        return false;
+    if (!create_debug_messenger())
+        return false;
+    if (!create_surface())
+        return false;
+    if (!pick_physical_device())
+        return false;
+    if (!create_logical_device())
+        return false;
+    if (!create_swapchain())
+        return false;
+    if (!create_render_pass())
+        return false;
+    if (!create_graphics_pipeline())
+        return false;
+    if (!create_framebuffers())
+        return false;
+    if (!create_command_pool())
+        return false;
+    if (!create_command_buffers())
+        return false;
+    if (!create_sync_objects())
+        return false;
 
     kuma::log::info("Vulkan renderer initialized");
     return true;
 }
 
 void RendererImpl::shutdown() {
-    if (device_ == VK_NULL_HANDLE) return;
+    if (device_ == VK_NULL_HANDLE)
+        return;
 
     vkDeviceWaitIdle(device_);
 
@@ -129,13 +143,12 @@ void RendererImpl::shutdown() {
 // ── Per-Frame Rendering ─────────────────────────────────────────
 
 bool RendererImpl::begin_frame() {
-    vkWaitForFences(device_, 1, &in_flight_fences_[current_frame_],
-        VK_TRUE, std::numeric_limits<uint64_t>::max());
+    vkWaitForFences(device_, 1, &in_flight_fences_[current_frame_], VK_TRUE,
+                    std::numeric_limits<uint64_t>::max());
 
-    VkResult result = vkAcquireNextImageKHR(device_, swapchain_,
-        std::numeric_limits<uint64_t>::max(),
-        image_available_semaphores_[current_frame_],
-        VK_NULL_HANDLE, &current_image_index_);
+    VkResult result = vkAcquireNextImageKHR(
+        device_, swapchain_, std::numeric_limits<uint64_t>::max(),
+        image_available_semaphores_[current_frame_], VK_NULL_HANDLE, &current_image_index_);
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR) {
         recreate_swapchain();
@@ -168,8 +181,8 @@ bool RendererImpl::begin_frame() {
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline_);
 
     // Build the MVP matrix.
-    float aspect = static_cast<float>(swapchain_extent_.width)
-                 / static_cast<float>(swapchain_extent_.height);
+    float aspect =
+        static_cast<float>(swapchain_extent_.width) / static_cast<float>(swapchain_extent_.height);
 
     Mat4 model = Mat4::identity();
     Mat4 view = Mat4::look_at({0.0f, 0.0f, 2.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f});
@@ -178,8 +191,8 @@ bool RendererImpl::begin_frame() {
     // projection * view * model: model transforms first, then view, then project
     Mat4 mvp = projection * view * model;
 
-    vkCmdPushConstants(cmd, pipeline_layout_,
-        VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(Mat4), mvp.ptr());
+    vkCmdPushConstants(cmd, pipeline_layout_, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(Mat4),
+                       mvp.ptr());
 
     VkViewport viewport{};
     viewport.x = 0.0f;
@@ -201,8 +214,8 @@ bool RendererImpl::begin_frame() {
 
     vkCmdBindIndexBuffer(cmd, mesh_->index_buffer, 0, VK_INDEX_TYPE_UINT16);
 
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-        pipeline_layout_, 0, 1, &descriptor_sets_[current_frame_], 0, nullptr);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout_, 0, 1,
+                            &descriptor_sets_[current_frame_], 0, nullptr);
 
     vkCmdDrawIndexed(cmd, mesh_->index_count, 1, 0, 0, 0);
 
@@ -275,4 +288,4 @@ void RendererImpl::set_texture(const Texture* texture) {
     }
 }
 
-} // namespace kuma
+}  // namespace kuma

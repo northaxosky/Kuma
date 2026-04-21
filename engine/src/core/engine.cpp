@@ -1,5 +1,6 @@
 #include <kuma/kuma.h>
 #include <kuma/log.h>
+
 #include <SDL3/SDL.h>
 
 namespace kuma {
@@ -32,9 +33,7 @@ bool init(const EngineConfig& config) {
     renderer_config.height = config.window_height;
     renderer_config.enable_validation = config.enable_validation;
 
-    s_window.set_resize_callback([](int32_t w, int32_t h) {
-        s_renderer.on_resize(w, h);
-    });
+    s_window.set_resize_callback([](int32_t w, int32_t h) { s_renderer.on_resize(w, h); });
 
     if (!s_renderer.init(renderer_config)) {
         s_window.destroy();
@@ -69,9 +68,9 @@ bool init(const EngineConfig& config) {
 }
 
 void shutdown() {
-    s_renderer.wait_idle();           // GPU finishes all work
-    s_resource_manager.shutdown();    // safe to destroy textures/meshes
-    s_renderer.shutdown();            // destroy Vulkan device last
+    s_renderer.wait_idle();         // GPU finishes all work
+    s_resource_manager.shutdown();  // safe to destroy textures/meshes
+    s_renderer.shutdown();          // destroy Vulkan device last
     s_window.destroy();
     SDL_Quit();
     kuma::log::info("Engine shut down");
@@ -89,4 +88,4 @@ ResourceManager& get_resource_manager() {
     return s_resource_manager;
 }
 
-} // namespace kuma
+}  // namespace kuma

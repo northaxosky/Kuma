@@ -2,8 +2,9 @@
 // Colored console output using ANSI escape codes.
 
 #include <kuma/log.h>
-#include <cstdio>
+
 #include <cstdarg>
+#include <cstdio>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -14,9 +15,9 @@ namespace kuma::log {
 // ── State ───────────────────────────────────────────────────────
 
 #ifdef NDEBUG
-static Level s_min_level = Level::Info;     // release: skip trace
+static Level s_min_level = Level::Info;  // release: skip trace
 #else
-static Level s_min_level = Level::Trace;    // debug: show everything
+static Level s_min_level = Level::Trace;  // debug: show everything
 #endif
 
 // ── ANSI Color Codes ────────────────────────────────────────────
@@ -29,11 +30,11 @@ static Level s_min_level = Level::Trace;    // debug: show everything
 //   31     = red                     — error
 //   0m     = reset to default
 
-static constexpr const char* COLOR_RESET  = "\033[0m";
-static constexpr const char* COLOR_TRACE  = "\033[90m";    // gray
-static constexpr const char* COLOR_INFO   = "\033[37m";    // white
-static constexpr const char* COLOR_WARN   = "\033[33m";    // yellow
-static constexpr const char* COLOR_ERROR  = "\033[31m";    // red
+static constexpr const char* COLOR_RESET = "\033[0m";
+static constexpr const char* COLOR_TRACE = "\033[90m";  // gray
+static constexpr const char* COLOR_INFO = "\033[37m";   // white
+static constexpr const char* COLOR_WARN = "\033[33m";   // yellow
+static constexpr const char* COLOR_ERROR = "\033[31m";  // red
 
 // ── Enable ANSI on Windows ──────────────────────────────────────
 // Windows needs virtual terminal processing enabled for ANSI codes.
@@ -42,10 +43,12 @@ static constexpr const char* COLOR_ERROR  = "\033[31m";    // red
 #ifdef _WIN32
 static bool enable_ansi_colors() {
     HANDLE console = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (console == INVALID_HANDLE_VALUE) return false;
+    if (console == INVALID_HANDLE_VALUE)
+        return false;
 
     DWORD mode = 0;
-    if (!GetConsoleMode(console, &mode)) return false;
+    if (!GetConsoleMode(console, &mode))
+        return false;
 
     mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
     return SetConsoleMode(console, mode) != 0;
@@ -57,16 +60,29 @@ static bool s_ansi_enabled = enable_ansi_colors();
 // ── Core Implementation ─────────────────────────────────────────
 
 static void log_message(Level level, const char* fmt, va_list args) {
-    if (level < s_min_level) return;
+    if (level < s_min_level)
+        return;
 
     const char* color = COLOR_INFO;
     const char* label = "info";
 
     switch (level) {
-        case Level::Trace: color = COLOR_TRACE; label = "Trace"; break;
-        case Level::Info:  color = COLOR_INFO;  label = "Info";  break;
-        case Level::Warn:  color = COLOR_WARN;  label = "Warn";  break;
-        case Level::Error: color = COLOR_ERROR; label = "Error"; break;
+    case Level::Trace:
+        color = COLOR_TRACE;
+        label = "Trace";
+        break;
+    case Level::Info:
+        color = COLOR_INFO;
+        label = "Info";
+        break;
+    case Level::Warn:
+        color = COLOR_WARN;
+        label = "Warn";
+        break;
+    case Level::Error:
+        color = COLOR_ERROR;
+        label = "Error";
+        break;
     }
 
     // Print: [Kuma][level] message
@@ -109,4 +125,4 @@ void error(const char* fmt, ...) {
     va_end(args);
 }
 
-} // namespace kuma::log
+}  // namespace kuma::log

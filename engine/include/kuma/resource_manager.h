@@ -35,4 +35,4 @@ private:
     Impl* impl_ = nullptr;
 };
 
-} // namespace kuma
+}  // namespace kuma

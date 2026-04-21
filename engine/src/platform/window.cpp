@@ -1,5 +1,6 @@
-#include <kuma/window.h>
 #include <kuma/log.h>
+#include <kuma/window.h>
+
 #include <SDL3/SDL.h>
 
 namespace kuma {
@@ -9,9 +10,7 @@ Window::~Window() {
 }
 
 Window::Window(Window&& other) noexcept
-    : window_(other.window_)
-    , width_(other.width_)
-    , height_(other.height_) {
+    : window_(other.window_), width_(other.width_), height_(other.height_) {
     other.window_ = nullptr;
     other.width_ = 0;
     other.height_ = 0;
@@ -31,12 +30,8 @@ Window& Window::operator=(Window&& other) noexcept {
 }
 
 bool Window::create(const WindowConfig& config) {
-    window_ = SDL_CreateWindow(
-        config.title,
-        config.width,
-        config.height,
-        SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE
-    );
+    window_ = SDL_CreateWindow(config.title, config.width, config.height,
+                               SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
 
     if (!window_) {
         kuma::log::error("Failed to create window: %s", SDL_GetError());
@@ -46,8 +41,7 @@ bool Window::create(const WindowConfig& config) {
     width_ = config.width;
     height_ = config.height;
 
-    kuma::log::info("Window created: %s (%dx%d)",
-        config.title, width_, height_);
+    kuma::log::info("Window created: %s (%dx%d)", config.title, width_, height_);
     return true;
 }
 
@@ -78,4 +72,4 @@ bool Window::poll_events() {
     return true;
 }
 
-} // namespace kuma
+}  // namespace kuma

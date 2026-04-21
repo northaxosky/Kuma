@@ -57,12 +57,8 @@ bool RendererImpl::create_swapchain() {
         view_info.image = swapchain_images_[i];
         view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
         view_info.format = swapchain_format_;
-        view_info.components = {
-            VK_COMPONENT_SWIZZLE_IDENTITY,
-            VK_COMPONENT_SWIZZLE_IDENTITY,
-            VK_COMPONENT_SWIZZLE_IDENTITY,
-            VK_COMPONENT_SWIZZLE_IDENTITY
-        };
+        view_info.components = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
+                                VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
         view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         view_info.subresourceRange.baseMipLevel = 0;
         view_info.subresourceRange.levelCount = 1;
@@ -76,8 +72,8 @@ bool RendererImpl::create_swapchain() {
         }
     }
 
-    kuma::log::info("Swapchain created: %ux%u (%u images)",
-        extent.width, extent.height, image_count);
+    kuma::log::info("Swapchain created: %ux%u (%u images)", extent.width, extent.height,
+                    image_count);
     return true;
 }
 
@@ -108,8 +104,10 @@ bool RendererImpl::recreate_swapchain() {
     vkDeviceWaitIdle(device_);
     destroy_swapchain();
 
-    if (!create_swapchain())    return false;
-    if (!create_framebuffers()) return false;
+    if (!create_swapchain())
+        return false;
+    if (!create_framebuffers())
+        return false;
 
     uint32_t image_count = static_cast<uint32_t>(swapchain_images_.size());
     render_finished_semaphores_.resize(image_count);
@@ -236,17 +234,14 @@ VkExtent2D RendererImpl::choose_extent() const {
         return capabilities.currentExtent;
     }
 
-    VkExtent2D extent = {
-        static_cast<uint32_t>(width_),
-        static_cast<uint32_t>(height_)
-    };
+    VkExtent2D extent = {static_cast<uint32_t>(width_), static_cast<uint32_t>(height_)};
 
-    extent.width = std::clamp(extent.width,
-        capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
-    extent.height = std::clamp(extent.height,
-        capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
+    extent.width = std::clamp(extent.width, capabilities.minImageExtent.width,
+                              capabilities.maxImageExtent.width);
+    extent.height = std::clamp(extent.height, capabilities.minImageExtent.height,
+                               capabilities.maxImageExtent.height);
 
     return extent;
 }
 
-} // namespace kuma
+}  // namespace kuma

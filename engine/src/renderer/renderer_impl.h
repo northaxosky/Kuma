@@ -4,17 +4,18 @@
 // Shared by all renderer .cpp files. Defines the RendererImpl class
 // and common types. Game code never sees this — only renderer.h.
 
+#include <kuma/log.h>
 #include <kuma/renderer.h>
-#include <vulkan/vulkan.h>
+
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
-#include <kuma/log.h>
-#include <cstring>
 #include <algorithm>
+#include <array>
+#include <cstring>
+#include <fstream>
 #include <limits>
 #include <vector>
-#include <fstream>
-#include <array>
+#include <vulkan/vulkan.h>
 
 namespace kuma {
 
@@ -23,8 +24,8 @@ namespace kuma {
 //   layout(location = 1) in vec2 in_uv        →  uv       (offset 8)
 
 struct Vertex {
-    float position[2];   // x, y  — clip space coordinates (-1 to +1)
-    float uv[2];         // u, v  — texture coordinates (0 to 1)
+    float position[2];  // x, y  — clip space coordinates (-1 to +1)
+    float uv[2];        // u, v  — texture coordinates (0 to 1)
 };
 
 // ── Texture ─────────────────────────────────────────────────────
@@ -117,10 +118,8 @@ private:
     bool create_command_pool();
     bool create_command_buffers();
     bool create_sync_objects();
-    void copy_buffer_to_image(VkBuffer buffer, VkImage image,
-        uint32_t width, uint32_t height);
-    void transition_image_layout(VkImage image, VkImageLayout old_layout,
-        VkImageLayout new_layout);
+    void copy_buffer_to_image(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
+    void transition_image_layout(VkImage image, VkImageLayout old_layout, VkImageLayout new_layout);
     VkCommandBuffer begin_single_command() const;
     void end_single_command(VkCommandBuffer cmd) const;
     uint32_t find_memory_type(uint32_t type_filter, VkMemoryPropertyFlags properties) const;
@@ -182,4 +181,4 @@ private:
     bool framebuffer_resized_ = false;
 };
 
-} // namespace kuma
+}  // namespace kuma

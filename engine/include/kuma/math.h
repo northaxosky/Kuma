@@ -15,13 +15,9 @@ struct Vec3 {
     Vec3() = default;
     Vec3(float x, float y, float z) : x(x), y(y), z(z) {}
 
-    Vec3 operator-(const Vec3& other) const {
-        return {x - other.x, y - other.y, z - other.z};
-    }
+    Vec3 operator-(const Vec3& other) const { return {x - other.x, y - other.y, z - other.z}; }
 
-    Vec3 operator*(float scalar) const {
-        return {x * scalar, y * scalar, z * scalar};
-    }
+    Vec3 operator*(float scalar) const { return {x * scalar, y * scalar, z * scalar}; }
 };
 
 // Dot product: measures how parallel two vectors are
@@ -31,17 +27,14 @@ inline float dot(const Vec3& a, const Vec3& b) {
 
 // Cross product: gives a vector perpendicular to both inputs
 inline Vec3 cross(const Vec3& a, const Vec3& b) {
-    return {
-        a.y * b.z - a.z * b.y,
-        a.z * b.x - a.x * b.z,
-        a.x * b.y - a.y * b.x
-    };
+    return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
 }
 
 // Normalize: scale a vector to length 1 (unit vector)
 inline Vec3 normalize(const Vec3& v) {
     float len = std::sqrt(dot(v, v));
-    if (len == 0.0f) return {0.0f, 0.0f, 0.0f};
+    if (len == 0.0f)
+        return {0.0f, 0.0f, 0.0f};
     return v * (1.0f / len);
 }
 
@@ -104,10 +97,10 @@ struct Mat4 {
         // w_clip positive (required for correct clipping).
         Mat4 m{};
         m(0, 0) = 1.0f / (aspect * tan_half_fov);
-        m(1, 1) = -1.0f / tan_half_fov;           // flip Y for Vulkan
-        m(2, 2) = far / (near - far);              // maps z to 0..1 (reversed for -Z)
+        m(1, 1) = -1.0f / tan_half_fov;  // flip Y for Vulkan
+        m(2, 2) = far / (near - far);    // maps z to 0..1 (reversed for -Z)
         m(2, 3) = (far * near) / (near - far);
-        m(3, 2) = -1.0f;                           // w_clip = -z_view (positive for -Z)
+        m(3, 2) = -1.0f;  // w_clip = -z_view (positive for -Z)
         return m;
     }
 
@@ -116,21 +109,27 @@ struct Mat4 {
     //   target: what the camera is looking at
     //   up:     which direction is "up" (usually 0,1,0)
     static Mat4 look_at(const Vec3& eye, const Vec3& target, const Vec3& up) {
-        Vec3 forward = normalize(target - eye);         // camera looks this way
-        Vec3 right = normalize(cross(forward, up));     // camera's right
-        Vec3 cam_up = cross(right, forward);            // camera's true up
+        Vec3 forward = normalize(target - eye);      // camera looks this way
+        Vec3 right = normalize(cross(forward, up));  // camera's right
+        Vec3 cam_up = cross(right, forward);         // camera's true up
 
         // The view matrix uses -forward for the Z row because the camera
         // looks down -Z in Vulkan/OpenGL convention. Without the negation,
         // the image flips vertically.
         Mat4 m = identity();
-        m(0, 0) =  right.x;    m(0, 1) =  right.y;    m(0, 2) =  right.z;
-        m(1, 0) =  cam_up.x;   m(1, 1) =  cam_up.y;   m(1, 2) =  cam_up.z;
-        m(2, 0) = -forward.x;  m(2, 1) = -forward.y;  m(2, 2) = -forward.z;
+        m(0, 0) = right.x;
+        m(0, 1) = right.y;
+        m(0, 2) = right.z;
+        m(1, 0) = cam_up.x;
+        m(1, 1) = cam_up.y;
+        m(1, 2) = cam_up.z;
+        m(2, 0) = -forward.x;
+        m(2, 1) = -forward.y;
+        m(2, 2) = -forward.z;
 
         m(0, 3) = -dot(right, eye);
         m(1, 3) = -dot(cam_up, eye);
-        m(2, 3) =  dot(forward, eye);
+        m(2, 3) = dot(forward, eye);
 
         return m;
     }
@@ -152,4 +151,4 @@ inline Mat4 operator*(const Mat4& a, const Mat4& b) {
     return result;
 }
 
-} // namespace kuma
+}  // namespace kuma

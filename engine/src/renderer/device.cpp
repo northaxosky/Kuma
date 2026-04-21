@@ -9,11 +9,8 @@ namespace kuma {
 // Vulkan validation layers call this when they detect an error.
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
-    VkDebugUtilsMessageSeverityFlagBitsEXT severity,
-    VkDebugUtilsMessageTypeFlagsEXT /*type*/,
-    const VkDebugUtilsMessengerCallbackDataEXT* callback_data,
-    void* /*user_data*/)
-{
+    VkDebugUtilsMessageSeverityFlagBitsEXT severity, VkDebugUtilsMessageTypeFlagsEXT /*type*/,
+    const VkDebugUtilsMessengerCallbackDataEXT* callback_data, void* /*user_data*/) {
     if (severity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
         kuma::log::warn("[Vulkan] %s", callback_data->pMessage);
     }
@@ -64,17 +61,16 @@ bool RendererImpl::create_instance() {
 // ── Debug Messenger ─────────────────────────────────────────────
 
 bool RendererImpl::create_debug_messenger() {
-    if (!validation_enabled_) return true;
+    if (!validation_enabled_)
+        return true;
 
     VkDebugUtilsMessengerCreateInfoEXT create_info{};
     create_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-    create_info.messageSeverity =
-        VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
-        VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
-    create_info.messageType =
-        VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
-        VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
-        VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+    create_info.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+                                  VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+    create_info.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
+                              VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
+                              VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
     create_info.pfnUserCallback = debug_callback;
 
     auto create_fn = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(
@@ -155,9 +151,7 @@ bool RendererImpl::create_logical_device() {
     queue_info.queueCount = 1;
     queue_info.pQueuePriorities = &queue_priority;
 
-    const char* device_extensions[] = {
-        VK_KHR_SWAPCHAIN_EXTENSION_NAME
-    };
+    const char* device_extensions[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 
     VkPhysicalDeviceFeatures features{};
 
@@ -181,4 +175,4 @@ bool RendererImpl::create_logical_device() {
     return true;
 }
 
-} // namespace kuma
+}  // namespace kuma
