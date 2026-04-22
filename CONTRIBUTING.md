@@ -37,13 +37,13 @@ Kuma uses [Conventional Commits](https://www.conventionalcommits.org/) with a sc
 <type>(<scope>): <short imperative summary>
 
 <optional longer body explaining the why>
-
-Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
 ```
 
 **Types used here:** `feat`, `fix`, `refactor`, `docs`, `chore`, `style`, `test`, `perf`.
 
 **Scopes are module names:** `renderer`, `input`, `math`, `sandbox`, `vscode`, etc.
+
+**No co-author trailers.** Commits are authored by the repository owner only.
 
 ### Rules
 
@@ -53,8 +53,7 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
 2. **Imperative summary.** `add input enums`, not `added input enums` or `adds input enums`.
 3. **Explain the why** in the body when it isn't obvious from the diff. A good rule:
    if someone looking at this commit in a year needs context, it belongs in the message.
-4. **Co-authored-by trailer** on commits touching agent-authored code (most of them, in
-   this repo).
+4. **No co-author trailers.** Commits are authored by the repo owner only.
 
 ### Examples
 
