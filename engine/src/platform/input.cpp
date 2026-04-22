@@ -158,7 +158,30 @@ void InputState::process_event(const SDL_Event& e) {
             break;
         }
 
-        // Mouse and focus-loss handling arrive in commits 3 and later.
+        // ── Mouse ───────────────────────────────────────────────
+        case SDL_EVENT_MOUSE_MOTION: {
+            // Latest-wins for absolute position.
+            mouse_pos = {e.motion.x, e.motion.y};
+            // Accumulate relative deltas; multiple motion events can
+            // fire per frame at high polling rates and they must all
+            // count toward this frame's delta.
+            mouse_delta_accum += Vec2(e.motion.xrel, e.motion.yrel);
+            break;
+        }
+        case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        case SDL_EVENT_MOUSE_BUTTON_UP: {
+            // SDL_BUTTON_LEFT..X2 are 1..5; our MouseButton is 0..4.
+            // Anything outside that range is a device quirk — drop it.
+            const int sdl_button = e.button.button;
+            if (sdl_button < SDL_BUTTON_LEFT || sdl_button > SDL_BUTTON_X2) {
+                break;
+            }
+            const std::size_t idx = static_cast<std::size_t>(sdl_button - SDL_BUTTON_LEFT);
+            current_mouse_buttons[idx] = (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN);
+            break;
+        }
+
+        // Focus-loss handling arrives in a later commit.
         default:
             break;
     }
@@ -189,6 +212,13 @@ void process_sdl_event(const SDL_Event& e) {
 bool is_key_down(Key k)      { return s_state.is_key_down(k); }
 bool was_key_pressed(Key k)  { return s_state.was_key_pressed(k); }
 bool was_key_released(Key k) { return s_state.was_key_released(k); }
+
+Vec2 mouse_position() { return s_state.mouse_position(); }
+Vec2 mouse_delta()    { return s_state.mouse_delta(); }
+
+bool is_mouse_button_down(MouseButton b)      { return s_state.is_mouse_button_down(b); }
+bool was_mouse_button_pressed(MouseButton b)  { return s_state.was_mouse_button_pressed(b); }
+bool was_mouse_button_released(MouseButton b) { return s_state.was_mouse_button_released(b); }
 
 }  // namespace input
 

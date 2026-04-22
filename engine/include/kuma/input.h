@@ -11,6 +11,8 @@
 
 #include <cstdint>
 
+#include <kuma/math.h>
+
 namespace kuma {
 
 // ── Key ─────────────────────────────────────────────────────────
@@ -91,6 +93,21 @@ bool was_key_pressed(Key k);
 
 // Edge:   did the key transition down → up this frame?
 bool was_key_released(Key k);
+
+// ── Mouse queries ───────────────────────────────────────────────
+// Cursor position in window pixels, top-left origin. Latest value
+// from the most recent MOUSE_MOTION event — no edge semantics.
+Vec2 mouse_position();
+
+// Cumulative cursor motion since the last begin_frame(). Sourced
+// from SDL's per-event xrel/yrel, so it remains correct when the
+// cursor is clamped to the screen edge or in relative mode.
+Vec2 mouse_delta();
+
+// Same three-flavor query set as keys, but for mouse buttons.
+bool is_mouse_button_down(MouseButton b);
+bool was_mouse_button_pressed(MouseButton b);
+bool was_mouse_button_released(MouseButton b);
 
 }  // namespace input
 
