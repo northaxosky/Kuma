@@ -43,8 +43,6 @@ Kuma uses [Conventional Commits](https://www.conventionalcommits.org/) with a sc
 
 **Scopes are module names:** `renderer`, `input`, `math`, `sandbox`, `vscode`, etc.
 
-**No co-author trailers.** Commits are authored by the repository owner only.
-
 ### Rules
 
 1. **Atomic and single-purpose.** A formatting pass is its own commit, separate from a
@@ -53,7 +51,6 @@ Kuma uses [Conventional Commits](https://www.conventionalcommits.org/) with a sc
 2. **Imperative summary.** `add input enums`, not `added input enums` or `adds input enums`.
 3. **Explain the why** in the body when it isn't obvious from the diff. A good rule:
    if someone looking at this commit in a year needs context, it belongs in the message.
-4. **No co-author trailers.** Commits are authored by the repo owner only.
 
 ### Examples
 
@@ -179,6 +176,3 @@ This is what makes the platform layer actually a layer.
 - Tests: `cd build && ctest -C Debug --output-on-failure`
 - Clean slate: delete the `build/` directory and reconfigure
 - Format a file: save it in VS Code (auto), or run clang-format manually
-
-For deeper architectural questions, check [CLAUDE.md](CLAUDE.md) — it's the
-engine's design + agent-collaboration guide.
