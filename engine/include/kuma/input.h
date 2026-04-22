@@ -71,4 +71,27 @@ enum class MouseButton : uint8_t {
     Count
 };
 
+// ── Lifecycle ───────────────────────────────────────────────────
+// Called by the engine, not by game code.
+namespace input {
+
+bool init();
+void shutdown();
+
+// Snapshots current → previous state. Call once per frame, before
+// the event pump runs (i.e. before window.poll_events()).
+void begin_frame();
+
+// ── Keyboard queries ────────────────────────────────────────────
+// State:  is the key held right now?
+bool is_key_down(Key k);
+
+// Edge:   did the key transition up → down this frame?
+bool was_key_pressed(Key k);
+
+// Edge:   did the key transition down → up this frame?
+bool was_key_released(Key k);
+
+}  // namespace input
+
 }  // namespace kuma

@@ -7,6 +7,7 @@ add_library(kuma-engine STATIC)
 target_sources(kuma-engine PRIVATE
     src/core/engine.cpp
     src/core/log.cpp
+    src/platform/input.cpp
     src/platform/window.cpp
     src/renderer/renderer.cpp
     src/renderer/device.cpp
