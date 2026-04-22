@@ -23,6 +23,12 @@ Kuma is designed for small, indie games — prioritizing simplicity, modularity,
 - Scene graph / ECS
 - Audio, physics
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for commit conventions, comment style, and code
+style. TL;DR: Conventional Commits, clang-format on save, public headers don't leak
+SDL/Vulkan types.
+
 ## Building
 
 ### Requirements
@@ -60,7 +66,7 @@ Kuma/
 │   └── shaders/                GLSL shaders (compiled to SPIR-V at build time)
 ├── sandbox/                    Test application
 ├── assets/                     Game assets (textures, models)
-├── tests/                      Unit tests (placeholder)
+├── tests/                      Unit tests (GoogleTest)
 └── .vscode/                    VS Code launch + build tasks
 ```
 
