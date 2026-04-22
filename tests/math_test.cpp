@@ -13,6 +13,7 @@
 #include <cmath>
 
 using kuma::Mat4;
+using kuma::Vec2;
 using kuma::Vec3;
 
 namespace {
@@ -209,6 +210,55 @@ TEST(Vec3, NormalizeOfNonAxisAlignedVector) {
     EXPECT_NEAR(n.x, 1.0f / 3.0f, kEps);
     EXPECT_NEAR(n.y, 2.0f / 3.0f, kEps);
     EXPECT_NEAR(n.z, 2.0f / 3.0f, kEps);
+}
+
+// ── Vec2 ────────────────────────────────────────────────────────────
+
+TEST(Vec2, DefaultConstructsToZero) {
+    Vec2 v;
+    EXPECT_FLOAT_EQ(v.x, 0.0f);
+    EXPECT_FLOAT_EQ(v.y, 0.0f);
+}
+
+TEST(Vec2, ComponentConstruct) {
+    Vec2 v(3.0f, -4.0f);
+    EXPECT_FLOAT_EQ(v.x, 3.0f);
+    EXPECT_FLOAT_EQ(v.y, -4.0f);
+}
+
+TEST(Vec2, AddProducesComponentSum) {
+    Vec2 r = Vec2(1.0f, 2.0f) + Vec2(10.0f, 20.0f);
+    EXPECT_FLOAT_EQ(r.x, 11.0f);
+    EXPECT_FLOAT_EQ(r.y, 22.0f);
+}
+
+TEST(Vec2, SubtractProducesComponentDifference) {
+    Vec2 r = Vec2(10.0f, 20.0f) - Vec2(1.0f, 2.0f);
+    EXPECT_FLOAT_EQ(r.x, 9.0f);
+    EXPECT_FLOAT_EQ(r.y, 18.0f);
+}
+
+TEST(Vec2, ScalarMultiply) {
+    Vec2 r = Vec2(2.0f, -3.0f) * 2.5f;
+    EXPECT_FLOAT_EQ(r.x, 5.0f);
+    EXPECT_FLOAT_EQ(r.y, -7.5f);
+}
+
+TEST(Vec2, PlusEqualsAccumulates) {
+    // This is the path mouse-delta accumulation takes each frame, so the
+    // in-place update semantics need to hold exactly.
+    Vec2 acc(0.0f, 0.0f);
+    acc += Vec2(1.0f, 2.0f);
+    acc += Vec2(3.0f, 4.0f);
+    acc += Vec2(-1.0f, 0.0f);
+    EXPECT_FLOAT_EQ(acc.x, 3.0f);
+    EXPECT_FLOAT_EQ(acc.y, 6.0f);
+}
+
+TEST(Vec2, EqualityRequiresBothComponents) {
+    EXPECT_TRUE(Vec2(1.0f, 2.0f) == Vec2(1.0f, 2.0f));
+    EXPECT_FALSE(Vec2(1.0f, 2.0f) == Vec2(1.0f, 2.5f));
+    EXPECT_FALSE(Vec2(1.0f, 2.0f) == Vec2(0.5f, 2.0f));
 }
 
 // ── Mat4 layout ─────────────────────────────────────────────────────

@@ -5,6 +5,32 @@
 
 namespace kuma {
 
+// ── Vec2 ────────────────────────────────────────────────────────
+// 2D float vector. Used for anything screen-space: mouse position,
+// mouse delta, UI coordinates, texture UVs, 2D sprites.
+
+struct Vec2 {
+    float x = 0.0f;
+    float y = 0.0f;
+
+    Vec2() = default;
+    Vec2(float x, float y) : x(x), y(y) {}
+
+    Vec2 operator+(const Vec2& other) const { return {x + other.x, y + other.y}; }
+    Vec2 operator-(const Vec2& other) const { return {x - other.x, y - other.y}; }
+    Vec2 operator*(float scalar) const { return {x * scalar, y * scalar}; }
+
+    Vec2& operator+=(const Vec2& other) {
+        x += other.x;
+        y += other.y;
+        return *this;
+    }
+};
+
+inline bool operator==(const Vec2& a, const Vec2& b) {
+    return a.x == b.x && a.y == b.y;
+}
+
 // ── Vec3 ────────────────────────────────────────────────────────
 
 struct Vec3 {
