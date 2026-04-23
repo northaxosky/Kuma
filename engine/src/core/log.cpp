@@ -57,6 +57,28 @@ static bool enable_ansi_colors() {
 static bool s_ansi_enabled = enable_ansi_colors();
 #endif
 
+// ── Real-time stdout (debug builds only) ────────────────────────
+// When stdout is not a TTY (VS Code debug console, redirected to a
+// file, piped to another process), the C runtime defaults to block
+// buffering — so logs only appear in chunks of ~4 KB or at exit.
+//
+// Switch to unbuffered so every printf hits the console immediately.
+// Gated on !NDEBUG so release builds keep the default (faster)
+// buffering. NDEBUG is auto-defined by CMake in Release builds.
+//
+// _IONBF (no buffering) is used instead of _IOLBF (line) because
+// MSVC requires a non-zero buffer size for _IOLBF; with _IONBF the
+// buffer/size arguments are genuinely ignored.
+
+#ifndef NDEBUG
+static bool enable_realtime_stdout() {
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
+    return true;
+}
+
+static bool s_realtime_stdout = enable_realtime_stdout();
+#endif
+
 // ── Core Implementation ─────────────────────────────────────────
 
 static void log_message(Level level, const char* fmt, va_list args) {
