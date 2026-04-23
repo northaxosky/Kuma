@@ -12,7 +12,8 @@ int main() {
         return 1;
     }
 
-    kuma::log::info("Sandbox ready. Try: Esc to quit, WASD to log key press, LMB to log mouse position.");
+    kuma::log::info(
+        "Sandbox ready. Try: Esc to quit, WASD to log key press, LMB to log mouse position.");
 
     while (kuma::begin_frame()) {
         // ── Phase 3: UPDATE ─────────────────────────────────────
@@ -22,14 +23,18 @@ int main() {
         // a camera, which we'll wire up in a later module.
 
         if (kuma::input::was_key_pressed(kuma::Key::Escape)) {
-            kuma::log::info("Esc pressed — quitting");
+            kuma::log::info("Esc pressed - quitting");
             break;
         }
 
-        if (kuma::input::was_key_pressed(kuma::Key::W)) kuma::log::info("Pressed: W");
-        if (kuma::input::was_key_pressed(kuma::Key::A)) kuma::log::info("Pressed: A");
-        if (kuma::input::was_key_pressed(kuma::Key::S)) kuma::log::info("Pressed: S");
-        if (kuma::input::was_key_pressed(kuma::Key::D)) kuma::log::info("Pressed: D");
+        if (kuma::input::was_key_pressed(kuma::Key::W))
+            kuma::log::info("Pressed: W");
+        if (kuma::input::was_key_pressed(kuma::Key::A))
+            kuma::log::info("Pressed: A");
+        if (kuma::input::was_key_pressed(kuma::Key::S))
+            kuma::log::info("Pressed: S");
+        if (kuma::input::was_key_pressed(kuma::Key::D))
+            kuma::log::info("Pressed: D");
 
         if (kuma::input::was_mouse_button_pressed(kuma::MouseButton::Left)) {
             const kuma::Vec2 p = kuma::input::mouse_position();
@@ -48,10 +53,8 @@ int main() {
         if (frame > 1 && frame % 60 == 0) {
             const float dt = kuma::time::delta();
             kuma::log::info("frame %llu  dt=%.2fms  (~%.0f FPS)  total=%.1fs",
-                            static_cast<unsigned long long>(frame),
-                            dt * 1000.0f,
-                            dt > 0.0f ? 1.0f / dt : 0.0f,
-                            kuma::time::total());
+                            static_cast<unsigned long long>(frame), dt * 1000.0f,
+                            dt > 0.0f ? 1.0f / dt : 0.0f, kuma::time::total());
         }
 
         kuma::end_frame();
