@@ -1,5 +1,7 @@
 # Kuma
 
+[![CI](https://github.com/northaxosky/Kuma/actions/workflows/ci.yml/badge.svg)](https://github.com/northaxosky/Kuma/actions/workflows/ci.yml)
+
 Lightweight game engine built from scratch in C++ (with Rust where it makes sense).
 
 Kuma is designed for small, indie games — prioritizing simplicity, modularity, and ease of use over being everything to everyone.

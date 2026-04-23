@@ -1,0 +1,46 @@
+name: CI
+
+# When this runs:
+#   - push to master: catches direct pushes from dev machines
+#   - pull_request to master: catches contributions that haven't landed yet
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+# If a new commit lands on a branch while CI is still running for an older
+# commit on the same branch, cancel the older run. Stops us from burning
+# minutes on stale builds during a rapid push sequence.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Windows / MSVC / Debug
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Installs the Vulkan SDK into the runner, exports VULKAN_SDK, and
+      # adds glslc to PATH. We need the SDK at build time for shader
+      # compilation and because renderer code #includes <vulkan/vulkan.h>.
+      - name: Install Vulkan SDK
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          install_runtime: true
+          cache: true
+          stripdown: true
+
+      - name: Configure
+        run: cmake -B build -S . -DKUMA_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --config Debug --parallel
+
+      - name: Test
+        working-directory: build
+        run: ctest -C Debug --output-on-failure
