@@ -38,6 +38,21 @@ int main() {
             kuma::log::info("RMB click");
         }
 
+        // ── Time demo ───────────────────────────────────────────
+        // Throttled FPS log — every 60 ticks, instantaneous dt and
+        // its reciprocal. Skip frame 1 because the first tick reports
+        // dt=0 by design (no previous frame to measure against), and
+        // 1/0 is a noisy way to start the log.
+        const uint64_t frame = kuma::time::frame_count();
+        if (frame > 1 && frame % 60 == 0) {
+            const float dt = kuma::time::delta();
+            kuma::log::info("frame %llu  dt=%.2fms  (~%.0f FPS)  total=%.1fs",
+                            static_cast<unsigned long long>(frame),
+                            dt * 1000.0f,
+                            dt > 0.0f ? 1.0f / dt : 0.0f,
+                            kuma::time::total());
+        }
+
         kuma::end_frame();
     }
 
