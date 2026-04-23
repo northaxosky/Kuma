@@ -3,6 +3,8 @@
 
 #include "renderer_impl.h"
 
+#include "platform/paths.h"
+
 namespace kuma {
 
 // ── File I/O ────────────────────────────────────────────────────
@@ -45,8 +47,8 @@ VkShaderModule RendererImpl::create_shader_module(const std::vector<char>& code)
 // ── Graphics Pipeline ───────────────────────────────────────────
 
 bool RendererImpl::create_graphics_pipeline() {
-    auto vert_code = read_binary_file("shaders/quad.vert.spv");
-    auto frag_code = read_binary_file("shaders/quad.frag.spv");
+    auto vert_code = read_binary_file(platform::exe_relative("shaders/quad.vert.spv").c_str());
+    auto frag_code = read_binary_file(platform::exe_relative("shaders/quad.frag.spv").c_str());
 
     if (vert_code.empty() || frag_code.empty()) {
         kuma::log::error("Failed to load shader files");

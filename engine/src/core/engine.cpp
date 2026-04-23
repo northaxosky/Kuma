@@ -5,6 +5,8 @@
 
 #include <SDL3/SDL.h>
 
+#include "platform/paths.h"
+
 namespace kuma {
 
 // Internal — not in time.h because game code must not call it.
@@ -63,8 +65,10 @@ bool init(const EngineConfig& config) {
     }
 
     // Load default resources via the resource manager
-    const auto* mesh = s_resource_manager.load_mesh("assets/models/quad.obj");
-    const auto* texture = s_resource_manager.load_texture("assets/textures/VaultBoyNV.png");
+    const auto* mesh =
+        s_resource_manager.load_mesh(platform::exe_relative("assets/models/quad.obj").c_str());
+    const auto* texture = s_resource_manager.load_texture(
+        platform::exe_relative("assets/textures/VaultBoyNV.png").c_str());
 
     if (!mesh || !texture) {
         kuma::log::error("Failed to load default resources");
