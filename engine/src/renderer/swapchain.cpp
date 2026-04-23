@@ -212,17 +212,45 @@ VkSurfaceFormatKHR RendererImpl::choose_surface_format() const {
 }
 
 VkPresentModeKHR RendererImpl::choose_present_mode() const {
+    // Map the engine-level PresentMode to a Vulkan enum, then verify
+    // the GPU supports it. FIFO is the only mode the Vulkan spec
+    // guarantees on every implementation, so it's the universal
+    // fallback when the user's first choice isn't available.
+    VkPresentModeKHR preferred = VK_PRESENT_MODE_FIFO_KHR;
+    const char* preferred_name = "FIFO (vsync)";
+    switch (requested_present_mode_) {
+    case PresentMode::Vsync:
+        preferred = VK_PRESENT_MODE_FIFO_KHR;
+        preferred_name = "FIFO (vsync)";
+        break;
+    case PresentMode::Mailbox:
+        preferred = VK_PRESENT_MODE_MAILBOX_KHR;
+        preferred_name = "MAILBOX (low-latency, uncapped)";
+        break;
+    case PresentMode::Immediate:
+        preferred = VK_PRESENT_MODE_IMMEDIATE_KHR;
+        preferred_name = "IMMEDIATE (uncapped, may tear)";
+        break;
+    }
+
     uint32_t count = 0;
     vkGetPhysicalDeviceSurfacePresentModesKHR(physical_device_, surface_, &count, nullptr);
     std::vector<VkPresentModeKHR> modes(count);
     vkGetPhysicalDeviceSurfacePresentModesKHR(physical_device_, surface_, &count, modes.data());
 
     for (const auto& mode : modes) {
-        if (mode == VK_PRESENT_MODE_MAILBOX_KHR) {
+        if (mode == preferred) {
+            kuma::log::info("Present mode: %s", preferred_name);
             return mode;
         }
     }
 
+    if (preferred != VK_PRESENT_MODE_FIFO_KHR) {
+        kuma::log::warn("Present mode %s not supported, falling back to FIFO (vsync)",
+                        preferred_name);
+    } else {
+        kuma::log::info("Present mode: FIFO (vsync)");
+    }
     return VK_PRESENT_MODE_FIFO_KHR;
 }
 

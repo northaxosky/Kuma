@@ -131,6 +131,7 @@ private:
     int32_t width_ = 0;
     int32_t height_ = 0;
     bool validation_enabled_ = true;
+    PresentMode requested_present_mode_ = PresentMode::Vsync;
 
     // Core Vulkan objects
     VkInstance instance_ = VK_NULL_HANDLE;

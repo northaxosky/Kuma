@@ -16,6 +16,11 @@ struct EngineConfig {
     int32_t window_width = 1920;
     int32_t window_height = 1080;
     bool enable_validation = true;
+
+    // Frame pacing — see <kuma/renderer.h> for trade-offs. Defaults
+    // to vsync; flip to PresentMode::Mailbox for competitive low-
+    // latency scenarios.
+    PresentMode present_mode = PresentMode::Vsync;
 };
 
 // Initialize the engine. Call once at startup.

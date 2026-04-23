@@ -70,6 +70,7 @@ bool RendererImpl::init(const RendererConfig& config) {
     width_ = config.width;
     height_ = config.height;
     validation_enabled_ = config.enable_validation;
+    requested_present_mode_ = config.present_mode;
 
     if (!create_instance())
         return false;

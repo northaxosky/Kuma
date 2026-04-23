@@ -43,6 +43,7 @@ bool init(const EngineConfig& config) {
     renderer_config.width = config.window_width;
     renderer_config.height = config.window_height;
     renderer_config.enable_validation = config.enable_validation;
+    renderer_config.present_mode = config.present_mode;
 
     s_window.set_resize_callback([](int32_t w, int32_t h) { s_renderer.on_resize(w, h); });
 
