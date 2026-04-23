@@ -21,11 +21,20 @@ FetchContent_MakeAvailable(googletest)
 
 add_executable(kuma-tests
     math_test.cpp
+    input_test.cpp
 )
 
 target_link_libraries(kuma-tests PRIVATE
     kuma-engine
     GTest::gtest_main
+    SDL3::SDL3
+)
+
+# Tests reach into engine private headers (platform/input_internal.h, etc.)
+# via the engine's src/ directory. Public game code never sees this path —
+# only the test binary does.
+target_include_directories(kuma-tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/engine/src
 )
 
 # Same warning level as the engine — tests should be held to the same bar.
