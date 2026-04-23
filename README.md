@@ -10,16 +10,19 @@ Kuma is designed for small, indie games — prioritizing simplicity, modularity,
 
 ### What's Working
 
-- **Vulkan renderer** — graphics pipeline, textured quads, shader compilation
+- **Vulkan renderer** — graphics pipeline, textured quads, shader compilation, configurable present mode (vsync / mailbox / immediate)
 - **SDL3 platform layer** — windowing, event loop, resize handling
 - **Resource system** — load textures (PNG/JPG) and meshes (OBJ) from disk with caching
 - **Math** — Vec3, Mat4, and MVP matrix helpers
 - **MVP pipeline** — perspective camera, push-constant model-view-projection in the quad shader
+- **Input** — keyboard & mouse polling with edge detection (pressed/released this frame)
+- **Time** — monotonic delta / total / frame count with anti-spiral clamp
+- **Frame orchestration** — engine-owned `begin_frame()` / `end_frame()` wrapping a 5-phase contract (input → time → update → render → present)
 - **Logging** — severity levels, colored console output
 
 ### What's Next
 
-- Input system (keyboard, mouse)
+- Camera module (view / projection, FPS-style controls)
 - Scene graph / ECS
 - Audio, physics
 
