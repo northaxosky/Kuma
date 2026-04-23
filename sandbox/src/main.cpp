@@ -6,6 +6,7 @@ int main() {
     config.app_name = "Kuma Sandbox";
     config.window_width = 1920;
     config.window_height = 1080;
+    config.present_mode = kuma::PresentMode::Vsync;
 
     if (!kuma::init(config)) {
         return 1;
