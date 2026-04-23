@@ -1,4 +1,5 @@
 #include <kuma/kuma.h>
+#include <kuma/input.h>
 #include <kuma/log.h>
 
 #include <SDL3/SDL.h>
@@ -17,12 +18,18 @@ bool init(const EngineConfig& config) {
         return false;
     }
 
+    if (!input::init()) {
+        SDL_Quit();
+        return false;
+    }
+
     WindowConfig window_config{};
     window_config.title = config.app_name;
     window_config.width = config.window_width;
     window_config.height = config.window_height;
 
     if (!s_window.create(window_config)) {
+        input::shutdown();
         SDL_Quit();
         return false;
     }
@@ -37,6 +44,7 @@ bool init(const EngineConfig& config) {
 
     if (!s_renderer.init(renderer_config)) {
         s_window.destroy();
+        input::shutdown();
         SDL_Quit();
         return false;
     }
@@ -44,6 +52,7 @@ bool init(const EngineConfig& config) {
     if (!s_resource_manager.init(s_renderer.gpu_context())) {
         s_renderer.shutdown();
         s_window.destroy();
+        input::shutdown();
         SDL_Quit();
         return false;
     }
@@ -57,6 +66,7 @@ bool init(const EngineConfig& config) {
         s_resource_manager.shutdown();
         s_renderer.shutdown();
         s_window.destroy();
+        input::shutdown();
         SDL_Quit();
         return false;
     }
@@ -72,6 +82,7 @@ void shutdown() {
     s_resource_manager.shutdown();  // safe to destroy textures/meshes
     s_renderer.shutdown();          // destroy Vulkan device last
     s_window.destroy();
+    input::shutdown();
     SDL_Quit();
     kuma::log::info("Engine shut down");
 }

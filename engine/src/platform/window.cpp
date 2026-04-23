@@ -1,6 +1,8 @@
 #include <kuma/log.h>
 #include <kuma/window.h>
 
+#include "platform/input_internal.h"
+
 #include <SDL3/SDL.h>
 
 namespace kuma {
@@ -54,8 +56,17 @@ void Window::destroy() {
 }
 
 bool Window::poll_events() {
+    // Snapshot input state for edge detection BEFORE draining new events.
+    // This is the exact moment "previous frame" becomes "previous": the
+    // events about to flow in belong to the new frame's `current`.
+    input::begin_frame();
+
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
+        // Forward every event to the input system. It picks out the ones
+        // it cares about (keyboard, mouse) and ignores the rest.
+        input::process_sdl_event(event);
+
         switch (event.type) {
         case SDL_EVENT_QUIT:
             return false;
