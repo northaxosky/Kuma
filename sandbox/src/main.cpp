@@ -11,13 +11,10 @@ int main() {
         return 1;
     }
 
-    kuma::Window& window = kuma::get_window();
-    kuma::Renderer& renderer = kuma::get_renderer();
-
     kuma::log::info("Sandbox ready. Try: Esc to quit, WASD to log key press, LMB to log mouse position.");
 
-    while (window.poll_events()) {
-        // ── Input demo ──────────────────────────────────────────
+    while (kuma::begin_frame()) {
+        // ── Phase 3: UPDATE ─────────────────────────────────────
         // Edge queries (was_pressed / was_released) for things that
         // happen ONCE per user action — logging, menu toggles, etc.
         // State queries (is_key_down) for per-frame work like moving
@@ -41,9 +38,7 @@ int main() {
             kuma::log::info("RMB click");
         }
 
-        if (renderer.begin_frame()) {
-            renderer.end_frame();
-        }
+        kuma::end_frame();
     }
 
     kuma::shutdown();

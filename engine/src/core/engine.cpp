@@ -87,6 +87,35 @@ void shutdown() {
     kuma::log::info("Engine shut down");
 }
 
+// ── Frame orchestration ─────────────────────────────────────────
+// See ADR 0005 and the docstring in <kuma/kuma.h> for the phase
+// contract. This is the *only* place frame phase ordering is
+// hardcoded — modules must not call each other's frame hooks
+// directly.
+
+bool begin_frame() {
+    // Phase 1: INPUT — Window::poll_events drains SDL events and
+    // snapshots input state. Returns false on quit request.
+    if (!s_window.poll_events()) {
+        return false;
+    }
+
+    // Phase 2: TIME — clock tick will live here once the time
+    // module ships. Until then this is a no-op.
+
+    return true;
+}
+
+void end_frame() {
+    // Phase 4: RENDER + Phase 5: PRESENT — wrapped together because
+    // begin_frame() can return false on swapchain rebuild, in which
+    // case we must skip end_frame() to keep the renderer's internal
+    // state consistent.
+    if (s_renderer.begin_frame()) {
+        s_renderer.end_frame();
+    }
+}
+
 Window& get_window() {
     return s_window;
 }
