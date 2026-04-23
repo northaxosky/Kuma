@@ -6,6 +6,7 @@
 #include <kuma/input.h>
 #include <kuma/renderer.h>
 #include <kuma/resource_manager.h>
+#include <kuma/time.h>
 #include <kuma/window.h>
 
 namespace kuma {

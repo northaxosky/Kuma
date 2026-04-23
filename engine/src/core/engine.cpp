@@ -1,10 +1,14 @@
-#include <kuma/kuma.h>
 #include <kuma/input.h>
+#include <kuma/kuma.h>
 #include <kuma/log.h>
+#include <kuma/time.h>
 
 #include <SDL3/SDL.h>
 
 namespace kuma {
+
+// Internal — not in time.h because game code must not call it.
+namespace time { void tick(); }
 
 static Window s_window;
 static Renderer s_renderer;
@@ -88,10 +92,8 @@ void shutdown() {
 }
 
 // ── Frame orchestration ─────────────────────────────────────────
-// See ADR 0005 and the docstring in <kuma/kuma.h> for the phase
-// contract. This is the *only* place frame phase ordering is
-// hardcoded — modules must not call each other's frame hooks
-// directly.
+// This is the *only* place frame phase ordering is hardcoded —
+// modules must not call each other's frame hooks directly.
 
 bool begin_frame() {
     // Phase 1: INPUT — Window::poll_events drains SDL events and
@@ -100,8 +102,10 @@ bool begin_frame() {
         return false;
     }
 
-    // Phase 2: TIME — clock tick will live here once the time
-    // module ships. Until then this is a no-op.
+    // Phase 2: TIME — sample steady_clock and update the global
+    // Clock. After this returns, kuma::time::delta() is the
+    // duration of the previous frame (0 on the first frame).
+    time::tick();
 
     return true;
 }
