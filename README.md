@@ -17,6 +17,7 @@ Kuma is designed for small, indie games — prioritizing simplicity, modularity,
 - **Resource system** — load textures (PNG/JPG) and meshes (OBJ) from disk with caching
 - **Math** — Vec3, Mat4, and MVP matrix helpers
 - **MVP pipeline** — perspective camera, push-constant model-view-projection in the quad shader
+- **Camera** — reusable perspective camera plus keyboard free-fly controller in the sandbox
 - **Input** — keyboard & mouse polling with edge detection (pressed/released this frame)
 - **Time** — monotonic delta / total / frame count with anti-spiral clamp
 - **Frame orchestration** — engine-owned `begin_frame()` / `end_frame()` wrapping a 5-phase contract (input → time → update → render → present)
@@ -24,7 +25,7 @@ Kuma is designed for small, indie games — prioritizing simplicity, modularity,
 
 ### What's Next
 
-- Camera module (view / projection, FPS-style controls)
+- Mouse-look camera controls
 - Scene graph / ECS
 - Audio, physics
 
@@ -59,8 +60,11 @@ Kuma/
 ├── engine/                     Engine static library
 │   ├── include/kuma/           Public API headers
 │   │   ├── kuma.h              Main entry point
+│   │   ├── camera.h            Camera + free-fly controller
+│   │   ├── input.h             Keyboard and mouse polling
 │   │   ├── renderer.h          Renderer interface
 │   │   ├── resource_manager.h  Resource loading + caching
+│   │   ├── time.h              Frame delta / total time
 │   │   ├── window.h            Window management
 │   │   └── log.h               Logging system
 │   ├── src/
