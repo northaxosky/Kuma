@@ -38,6 +38,11 @@ public:
     using ResizeCallback = std::function<void(int32_t, int32_t)>;
     void set_resize_callback(ResizeCallback callback) { resize_callback_ = std::move(callback); }
 
+    // Enables/disables relative mouse mode for this window. In relative
+    // mode SDL hides the cursor and reports unlimited mouse deltas even
+    // when the physical cursor would have hit a screen edge.
+    bool set_relative_mouse_mode(bool enabled);
+
     SDL_Window* native_handle() const { return window_; }
     int32_t width() const { return width_; }
     int32_t height() const { return height_; }

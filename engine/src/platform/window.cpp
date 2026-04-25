@@ -84,4 +84,18 @@ bool Window::poll_events() {
     return true;
 }
 
+bool Window::set_relative_mouse_mode(bool enabled) {
+    if (!window_) {
+        kuma::log::error("Cannot set relative mouse mode: window is not created");
+        return false;
+    }
+
+    if (!SDL_SetWindowRelativeMouseMode(window_, enabled)) {
+        kuma::log::error("Failed to set relative mouse mode: %s", SDL_GetError());
+        return false;
+    }
+
+    return true;
+}
+
 }  // namespace kuma
