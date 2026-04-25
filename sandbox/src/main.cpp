@@ -12,29 +12,31 @@ int main() {
         return 1;
     }
 
+    kuma::Camera camera;
+    camera.set_perspective(0.78539816f,
+                           static_cast<float>(config.window_width) /
+                               static_cast<float>(config.window_height),
+                           0.1f, 100.0f);
+
+    kuma::FreeFlyCameraController camera_controller;
+
     kuma::log::info(
-        "Sandbox ready. Try: Esc to quit, WASD to log key press, LMB to log mouse position.");
+        "Sandbox ready. Try: Esc to quit, WASD to move camera, Q/E down/up, LMB to log mouse position.");
 
     while (kuma::begin_frame()) {
         // ── Phase 3: UPDATE ─────────────────────────────────────
         // Edge queries (was_pressed / was_released) for things that
         // happen ONCE per user action — logging, menu toggles, etc.
-        // State queries (is_key_down) for per-frame work like moving
-        // a camera, which we'll wire up in a later module.
+        // State queries (is_key_down) for per-frame work like camera
+        // movement, handled below by FreeFlyCameraController.
 
         if (kuma::input::was_key_pressed(kuma::Key::Escape)) {
             kuma::log::info("Esc pressed - quitting");
             break;
         }
 
-        if (kuma::input::was_key_pressed(kuma::Key::W))
-            kuma::log::info("Pressed: W");
-        if (kuma::input::was_key_pressed(kuma::Key::A))
-            kuma::log::info("Pressed: A");
-        if (kuma::input::was_key_pressed(kuma::Key::S))
-            kuma::log::info("Pressed: S");
-        if (kuma::input::was_key_pressed(kuma::Key::D))
-            kuma::log::info("Pressed: D");
+        camera_controller.update(camera);
+        kuma::get_renderer().set_view_projection(camera.view_projection());
 
         if (kuma::input::was_mouse_button_pressed(kuma::MouseButton::Left)) {
             const kuma::Vec2 p = kuma::input::mouse_position();
