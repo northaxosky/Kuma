@@ -58,6 +58,10 @@ void Renderer::set_texture(const void* texture) {
     impl_->set_texture(static_cast<const Texture*>(texture));
 }
 
+void Renderer::set_view_projection(const Mat4& view_projection) {
+    impl_->set_view_projection(view_projection);
+}
+
 void* Renderer::gpu_context() {
     static GpuContext ctx = impl_->gpu_context();
     return &ctx;
@@ -181,16 +185,20 @@ bool RendererImpl::begin_frame() {
     // Draw commands
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline_);
 
-    // Build the MVP matrix.
-    float aspect =
-        static_cast<float>(swapchain_extent_.width) / static_cast<float>(swapchain_extent_.height);
-
     Mat4 model = Mat4::identity();
-    Mat4 view = Mat4::look_at({0.0f, 0.0f, 2.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f});
-    Mat4 projection = Mat4::perspective(0.785f, aspect, 0.1f, 100.0f);
+
+    Mat4 view_projection = view_projection_;
+    if (!has_view_projection_) {
+        const float aspect = static_cast<float>(swapchain_extent_.width) /
+                             static_cast<float>(swapchain_extent_.height);
+        const Mat4 view =
+            Mat4::look_at({0.0f, 0.0f, 2.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f});
+        const Mat4 projection = Mat4::perspective(0.785f, aspect, 0.1f, 100.0f);
+        view_projection = projection * view;
+    }
 
     // projection * view * model: model transforms first, then view, then project
-    Mat4 mvp = projection * view * model;
+    Mat4 mvp = view_projection * model;
 
     vkCmdPushConstants(cmd, pipeline_layout_, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(Mat4),
                        mvp.ptr());
@@ -287,6 +295,11 @@ void RendererImpl::set_texture(const Texture* texture) {
     if (texture_ != nullptr) {
         create_descriptor_sets();
     }
+}
+
+void RendererImpl::set_view_projection(const Mat4& view_projection) {
+    view_projection_ = view_projection;
+    has_view_projection_ = true;
 }
 
 }  // namespace kuma

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <kuma/math.h>
+
 #include <cstdint>
 
 struct SDL_Window;
@@ -60,6 +62,11 @@ public:
     // Set the active texture and mesh (loaded by ResourceManager).
     void set_texture(const void* texture);
     void set_mesh(const void* mesh);
+
+    // Set the active camera matrix for subsequent frames. Usually called
+    // during Phase 3 UPDATE after camera movement, before end_frame()
+    // records Phase 4 render commands.
+    void set_view_projection(const Mat4& view_projection);
 
     // Internal — returns opaque GPU context for resource loading.
     // Game code should not call this.

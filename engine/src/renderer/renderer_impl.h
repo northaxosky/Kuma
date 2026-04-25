@@ -90,6 +90,7 @@ public:
     // Set resources loaded by the resource manager
     void set_texture(const Texture* texture);
     void set_mesh(const Mesh* mesh);
+    void set_view_projection(const Mat4& view_projection);
 
 private:
     // ── device.cpp ──────────────────────────────────────────────
@@ -161,6 +162,11 @@ private:
     // Resources (owned by ResourceManager, renderer borrows pointers)
     const Mesh* mesh_ = nullptr;
     const Texture* texture_ = nullptr;
+
+    // Camera matrix supplied by game/update code. Until the sandbox wires
+    // a real camera, the renderer keeps using its old hardcoded fallback.
+    Mat4 view_projection_ = Mat4::identity();
+    bool has_view_projection_ = false;
 
     // Descriptors
     VkDescriptorSetLayout descriptor_set_layout_ = VK_NULL_HANDLE;
