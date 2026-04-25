@@ -47,4 +47,4 @@ target_compile_options(kuma-tests PRIVATE
 
 # Auto-register each TEST() with CTest so `ctest` picks them up individually.
 include(GoogleTest)
-gtest_discover_tests(kuma-tests)
+gtest_discover_tests(kuma-tests DISCOVERY_TIMEOUT 30)

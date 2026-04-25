@@ -127,6 +127,17 @@ Key sdl_scancode_to_key(SDL_Scancode sc) {
     }
 }
 
+MouseButton sdl_button_to_mouse_button(Uint8 button) {
+    switch (button) {
+        case SDL_BUTTON_LEFT:   return MouseButton::Left;
+        case SDL_BUTTON_RIGHT:  return MouseButton::Right;
+        case SDL_BUTTON_MIDDLE: return MouseButton::Middle;
+        case SDL_BUTTON_X1:     return MouseButton::X1;
+        case SDL_BUTTON_X2:     return MouseButton::X2;
+        default:                return MouseButton::Count;
+    }
+}
+
 // ── Global State ────────────────────────────────────────────────
 // File-local so nothing outside this translation unit can poke at
 // it. The kuma::input:: namespace functions below are its only
@@ -170,13 +181,14 @@ void InputState::process_event(const SDL_Event& e) {
         }
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
         case SDL_EVENT_MOUSE_BUTTON_UP: {
-            // SDL_BUTTON_LEFT..X2 are 1..5; our MouseButton is 0..4.
-            // Anything outside that range is a device quirk — drop it.
-            const int sdl_button = e.button.button;
-            if (sdl_button < SDL_BUTTON_LEFT || sdl_button > SDL_BUTTON_X2) {
+            // SDL orders buttons Left, Middle, Right, X1, X2; Kuma orders
+            // Left, Right, Middle, X1, X2. Use an explicit mapping so RMB
+            // never accidentally becomes MMB.
+            const MouseButton button = sdl_button_to_mouse_button(e.button.button);
+            if (button == MouseButton::Count) {
                 break;
             }
-            const std::size_t idx = static_cast<std::size_t>(sdl_button - SDL_BUTTON_LEFT);
+            const std::size_t idx = static_cast<std::size_t>(button);
             current_mouse_buttons[idx] = (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN);
             break;
         }

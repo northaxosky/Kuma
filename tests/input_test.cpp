@@ -257,6 +257,24 @@ TEST(InputMouseButtons, ButtonDownSetsState) {
     EXPECT_FALSE(s.is_mouse_button_down(MouseButton::Right));
 }
 
+TEST(InputMouseButtons, RightButtonMapsToRightNotMiddle) {
+    InputState s;
+    s.process_event(MouseButtonEvent(SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_RIGHT));
+
+    EXPECT_FALSE(s.is_mouse_button_down(MouseButton::Left));
+    EXPECT_TRUE(s.is_mouse_button_down(MouseButton::Right));
+    EXPECT_FALSE(s.is_mouse_button_down(MouseButton::Middle));
+}
+
+TEST(InputMouseButtons, MiddleButtonMapsToMiddleNotRight) {
+    InputState s;
+    s.process_event(MouseButtonEvent(SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_MIDDLE));
+
+    EXPECT_FALSE(s.is_mouse_button_down(MouseButton::Left));
+    EXPECT_FALSE(s.is_mouse_button_down(MouseButton::Right));
+    EXPECT_TRUE(s.is_mouse_button_down(MouseButton::Middle));
+}
+
 TEST(InputMouseButtons, ButtonUpClearsState) {
     InputState s;
     s.process_event(MouseButtonEvent(SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT));
