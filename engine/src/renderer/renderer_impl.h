@@ -163,8 +163,7 @@ private:
     const Mesh* mesh_ = nullptr;
     const Texture* texture_ = nullptr;
 
-    // Camera matrix supplied by game/update code. Until the sandbox wires
-    // a real camera, the renderer keeps using its old hardcoded fallback.
+    // Camera matrix supplied by game/update code before Phase 4 rendering.
     Mat4 view_projection_ = Mat4::identity();
     bool has_view_projection_ = false;
 

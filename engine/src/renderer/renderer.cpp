@@ -148,6 +148,13 @@ void RendererImpl::shutdown() {
 // ── Per-Frame Rendering ─────────────────────────────────────────
 
 bool RendererImpl::begin_frame() {
+    if (!has_view_projection_) {
+        kuma::log::error(
+            "Renderer missing view-projection matrix; call Renderer::set_view_projection() before "
+            "kuma::end_frame()");
+        return false;
+    }
+
     vkWaitForFences(device_, 1, &in_flight_fences_[current_frame_], VK_TRUE,
                     std::numeric_limits<uint64_t>::max());
 
@@ -187,18 +194,8 @@ bool RendererImpl::begin_frame() {
 
     Mat4 model = Mat4::identity();
 
-    Mat4 view_projection = view_projection_;
-    if (!has_view_projection_) {
-        const float aspect = static_cast<float>(swapchain_extent_.width) /
-                             static_cast<float>(swapchain_extent_.height);
-        const Mat4 view =
-            Mat4::look_at({0.0f, 0.0f, 2.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f});
-        const Mat4 projection = Mat4::perspective(0.785f, aspect, 0.1f, 100.0f);
-        view_projection = projection * view;
-    }
-
     // projection * view * model: model transforms first, then view, then project
-    Mat4 mvp = view_projection * model;
+    Mat4 mvp = view_projection_ * model;
 
     vkCmdPushConstants(cmd, pipeline_layout_, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(Mat4),
                        mvp.ptr());
