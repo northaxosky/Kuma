@@ -113,6 +113,22 @@ TEST(Vec3, SubtractionIsComponentwise) {
     EXPECT_FLOAT_EQ(diff.z, 6.0f);
 }
 
+TEST(Vec3, AdditionIsComponentwise) {
+    Vec3 sum = Vec3{1, 2, 3} + Vec3{4, 5, 6};
+    EXPECT_FLOAT_EQ(sum.x, 5.0f);
+    EXPECT_FLOAT_EQ(sum.y, 7.0f);
+    EXPECT_FLOAT_EQ(sum.z, 9.0f);
+}
+
+TEST(Vec3, PlusEqualsAccumulates) {
+    Vec3 acc{0, 0, 0};
+    acc += Vec3{1, 2, 3};
+    acc += Vec3{-1, 4, 0};
+    EXPECT_FLOAT_EQ(acc.x, 0.0f);
+    EXPECT_FLOAT_EQ(acc.y, 6.0f);
+    EXPECT_FLOAT_EQ(acc.z, 3.0f);
+}
+
 TEST(Vec3, ScalarMultiplyScalesComponents) {
     // Used inside normalize. A bug here silently corrupts every
     // normalized vector in the engine.
