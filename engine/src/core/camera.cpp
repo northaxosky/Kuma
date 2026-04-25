@@ -79,6 +79,13 @@ Mat4 Camera::view_projection() const {
 }
 
 void FreeFlyCameraController::update(Camera& camera) const {
+    if (input::is_mouse_button_down(MouseButton::Right) &&
+        !input::was_mouse_button_pressed(MouseButton::Right)) {
+        const Vec2 delta = input::mouse_delta();
+        camera.set_rotation(camera.yaw() + delta.x * mouse_sensitivity,
+                            camera.pitch() - delta.y * mouse_sensitivity);
+    }
+
     Vec3 movement{};
 
     if (input::is_key_down(Key::W))

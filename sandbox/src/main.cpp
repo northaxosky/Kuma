@@ -19,9 +19,10 @@ int main() {
                            0.1f, 100.0f);
 
     kuma::FreeFlyCameraController camera_controller;
+    camera_controller.mouse_sensitivity = 0.0025f;
 
     kuma::log::info(
-        "Sandbox ready. Try: Esc to quit, WASD to move camera, Q/E down/up, LMB to log mouse position.");
+        "Sandbox ready. Try: Esc to quit, WASD to move camera, Q/E down/up, hold RMB to look.");
 
     while (kuma::begin_frame()) {
         // ── Phase 3: UPDATE ─────────────────────────────────────
@@ -31,8 +32,16 @@ int main() {
         // movement, handled below by FreeFlyCameraController.
 
         if (kuma::input::was_key_pressed(kuma::Key::Escape)) {
+            kuma::get_window().set_relative_mouse_mode(false);
             kuma::log::info("Esc pressed - quitting");
             break;
+        }
+
+        if (kuma::input::was_mouse_button_pressed(kuma::MouseButton::Right)) {
+            kuma::get_window().set_relative_mouse_mode(true);
+        }
+        if (kuma::input::was_mouse_button_released(kuma::MouseButton::Right)) {
+            kuma::get_window().set_relative_mouse_mode(false);
         }
 
         camera_controller.update(camera);
@@ -41,9 +50,6 @@ int main() {
         if (kuma::input::was_mouse_button_pressed(kuma::MouseButton::Left)) {
             const kuma::Vec2 p = kuma::input::mouse_position();
             kuma::log::info("LMB click at (%.0f, %.0f)", p.x, p.y);
-        }
-        if (kuma::input::was_mouse_button_pressed(kuma::MouseButton::Right)) {
-            kuma::log::info("RMB click");
         }
 
         // ── Time demo ───────────────────────────────────────────

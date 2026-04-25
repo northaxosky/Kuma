@@ -48,6 +48,7 @@ private:
 class FreeFlyCameraController {
 public:
     float move_speed = 3.0f;  // world units per second
+    float mouse_sensitivity = 0.0025f;  // radians per pixel
 
     // Phase 3: UPDATE. Consumes the Phase 1 input snapshot and Phase 2
     // delta time, then mutates the camera before Phase 4 rendering.
