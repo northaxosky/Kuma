@@ -109,11 +109,13 @@ int main() {
                                     ImGuiCond_FirstUseEver);
             ImGui::SetNextWindowSize(ImVec2(280.0f, 0.0f), ImGuiCond_FirstUseEver);
             if (ImGui::Begin("Sandbox", nullptr, ImGuiWindowFlags_NoCollapse)) {
+                kuma::debug::section_header("Camera");
                 const kuma::Vec3 p = camera.position();
-                ImGui::Text("Camera pos: (%.1f, %.1f, %.1f)", p.x, p.y, p.z);
-                ImGui::Text("Camera yaw: %.2f rad", camera.yaw());
-                ImGui::Text("Camera pitch: %.2f rad", camera.pitch());
-                ImGui::Separator();
+                ImGui::Text("Pos:   (%.1f, %.1f, %.1f)", p.x, p.y, p.z);
+                ImGui::Text("Yaw:   %.2f rad", camera.yaw());
+                ImGui::Text("Pitch: %.2f rad", camera.pitch());
+
+                kuma::debug::section_header("ECS");
                 ImGui::Text("Entities:   %zu", registry.view<kuma::Transform>().size());
                 ImGui::Text("Renderable: %zu",
                             (registry.view<kuma::Transform, RenderTag>().size()));

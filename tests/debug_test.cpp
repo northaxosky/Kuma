@@ -140,3 +140,26 @@ TEST(DebugVisibility, SetVisibleForcesValue) {
     kuma::debug::set_visible(false);
     EXPECT_FALSE(kuma::debug::is_visible());
 }
+
+// ── Monitor-derived thresholds ──────────────────────────────────
+// debug::init() isn't run in unit tests (no SDL window), so the
+// state defaults to the 60Hz fallback. These tests verify that
+// fallback and the threshold derivation math.
+
+TEST(DebugThresholds, FallsBackTo60HzWhenInitNeverRan) {
+    EXPECT_FLOAT_EQ(kuma::debug::monitor_refresh_hz(), 60.0f);
+}
+
+TEST(DebugThresholds, FrameTimeThresholdsScaleFromRefreshRate) {
+    // At 60Hz: target = 16.667ms, warn at 1.5x = 25ms, bad at 2x = 33.3ms.
+    const kuma::debug::StatusThresholds t = kuma::debug::frame_time_thresholds();
+    EXPECT_NEAR(t.warn_above, 25.0f, 0.1f);
+    EXPECT_NEAR(t.bad_above,  33.33f, 0.1f);
+}
+
+TEST(DebugThresholds, ThresholdsAreOrdered) {
+    // bad must always be a strictly worse threshold than warn,
+    // otherwise the color logic produces nonsense.
+    const kuma::debug::StatusThresholds t = kuma::debug::frame_time_thresholds();
+    EXPECT_GT(t.bad_above, t.warn_above);
+}

@@ -50,6 +50,42 @@ float one_percent_low_ms();
 // plotting. The pointer is valid until the next new_frame() call.
 const float* frame_time_history(std::size_t* out_count);
 
+// Monitor refresh rate (Hz) sampled at init. Used to derive the
+// frame-time thresholds that drive the green/yellow/red coloring
+// in the default panel. Returns 60.0f if the OS didn't report one.
+float monitor_refresh_hz();
+
+// ── Color helpers (used by the default panel; available for
+// custom panels too) ───────────────────────────────────────────
+
+// "Lower is better" thresholds for status_text. A measured value
+// below `warn_above` is green; between warn and bad is yellow;
+// above `bad_above` is red.
+struct StatusThresholds {
+    float warn_above;
+    float bad_above;
+};
+
+// Build the standard frame-time thresholds from the current monitor
+// refresh rate: warn when frame time exceeds 1.5x the ideal budget,
+// bad when it exceeds 2.0x. The defaults respond to the user's
+// monitor (16.7ms baseline at 60Hz, 6.9ms at 144Hz).
+StatusThresholds frame_time_thresholds();
+
+// Renders "label: <value>" where the value text is tinted red,
+// yellow, or green based on `thresholds`. The format string applies
+// to the value only and must consume exactly one float.
+//
+// Use case: status_text("FPS:", "%.1f", fps(), {30.0f, 15.0f}) -
+// note that for inverted metrics like FPS the caller passes the
+// inverted thresholds (lower is worse).
+void status_text(const char* label, const char* fmt, float value,
+                 StatusThresholds thresholds, bool higher_is_better = false);
+
+// Tinted bold-style header for grouping a panel's sections.
+// Renders in the engine's accent blue with a separator underneath.
+void section_header(const char* text);
+
 // ── Default panel ──────────────────────────────────────────────
 // Renders the standard FPS / frame time / 1% low / sparkline panel.
 // Call from your update loop if you want the default look. User

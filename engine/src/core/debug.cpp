@@ -30,6 +30,12 @@ struct DebugState {
     VkDevice device = VK_NULL_HANDLE;
     VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
 
+    // Sampled at init from SDL. Drives the green/yellow/red frame-time
+    // thresholds in the default panel so they match the user's monitor.
+    // Hot-swapping monitors mid-session is a known limitation; logged
+    // as a followup.
+    float monitor_refresh_hz = 60.0f;
+
     // Stats. Keep ~120 samples (2 seconds @ 60fps) for the sparkline.
     static constexpr std::size_t kHistoryCapacity = 120;
     std::array<float, kHistoryCapacity> frame_ms_history{};   // ring buffer, ms
@@ -298,8 +304,22 @@ bool init(const InitContext& ctx) {
     // ImGui 1.91 manages the font upload internally; just trigger it.
     ImGui_ImplVulkan_CreateFontsTexture();
 
+    // Sample the monitor refresh rate so the panel's frame-time
+    // thresholds match the user's hardware (60Hz baseline if SDL
+    // can't tell us). Defaults to 60.0f if anything goes wrong.
+    if (ctx.sdl_window) {
+        const SDL_DisplayID display = SDL_GetDisplayForWindow(ctx.sdl_window);
+        if (display != 0) {
+            const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(display);
+            if (mode && mode->refresh_rate > 0.0f) {
+                g.monitor_refresh_hz = mode->refresh_rate;
+            }
+        }
+    }
+
     g.initialized = true;
-    kuma::log::info("Debug overlay initialized (F3 to toggle)");
+    kuma::log::info("Debug overlay initialized (F3 to toggle, %.0fHz monitor)",
+                    g.monitor_refresh_hz);
     return true;
 }
 
@@ -391,19 +411,89 @@ void render(VkCommandBuffer cmd) {
 
 // ── Default panel ──────────────────────────────────────────────
 
+// ── Color helpers + monitor-derived thresholds ─────────────────
+
+float monitor_refresh_hz() { return g.monitor_refresh_hz; }
+
+StatusThresholds frame_time_thresholds() {
+    const float target_ms = 1000.0f / g.monitor_refresh_hz;
+    // 1.5x = noticeably uneven (yellow), 2.0x = dropped frames (red).
+    return StatusThresholds{
+        .warn_above = target_ms * 1.5f,
+        .bad_above  = target_ms * 2.0f,
+    };
+}
+
+namespace {
+
+// Picks a color for `value` given thresholds. `higher_is_better`
+// inverts the comparison so FPS-style metrics (where bigger is
+// better) work without the caller having to negate thresholds.
+ImVec4 status_color(float value, StatusThresholds t, bool higher_is_better) {
+    constexpr ImVec4 green  = ImVec4(0.40f, 0.85f, 0.40f, 1.0f);
+    constexpr ImVec4 yellow = ImVec4(1.00f, 0.85f, 0.30f, 1.0f);
+    constexpr ImVec4 red    = ImVec4(1.00f, 0.40f, 0.40f, 1.0f);
+
+    bool warn, bad;
+    if (higher_is_better) {
+        warn = value < t.warn_above;
+        bad  = value < t.bad_above;
+    } else {
+        warn = value > t.warn_above;
+        bad  = value > t.bad_above;
+    }
+    if (bad)  return red;
+    if (warn) return yellow;
+    return green;
+}
+
+}  // namespace
+
+void status_text(const char* label, const char* fmt, float value,
+                 StatusThresholds thresholds, bool higher_is_better) {
+    if (!g.initialized) return;
+    ImGui::TextUnformatted(label);
+    ImGui::SameLine();
+    ImGui::TextColored(status_color(value, thresholds, higher_is_better), fmt, value);
+}
+
+void section_header(const char* text) {
+    if (!g.initialized) return;
+    // Accent blue (matches the Kuma Dark style accent).
+    constexpr ImVec4 accent = ImVec4(0.0f, 0.71f, 1.0f, 1.0f);
+    ImGui::PushStyleColor(ImGuiCol_Text, accent);
+    ImGui::TextUnformatted(text);
+    ImGui::PopStyleColor();
+    ImGui::Separator();
+}
+
+// ── Default panel ──────────────────────────────────────────────
+
 void draw_default_panel() {
     if (!g.initialized || !g.visible) return;
 
-    // Top-right corner, fixed initial position; user can drag it.
     const ImGuiViewport* vp = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x - 16.0f, vp->WorkPos.y + 16.0f),
                             ImGuiCond_FirstUseEver, ImVec2(1.0f, 0.0f));
     ImGui::SetNextWindowSize(ImVec2(280.0f, 0.0f), ImGuiCond_FirstUseEver);
 
     if (ImGui::Begin("Kuma Debug", nullptr, ImGuiWindowFlags_NoCollapse)) {
-        ImGui::Text("FPS:        %.1f", fps());
-        ImGui::Text("Frame:      %.2f ms", frame_time_ms());
-        ImGui::Text("1%% low:     %.2f ms", one_percent_low_ms());
+        section_header("Performance");
+
+        const StatusThresholds frame_t = frame_time_thresholds();
+
+        // FPS uses the same thresholds but inverted (higher is better).
+        // The crossover points work out to the same wall-clock budget.
+        const float warn_fps = 1000.0f / frame_t.warn_above;
+        const float bad_fps  = 1000.0f / frame_t.bad_above;
+        status_text("FPS:       ", "%.1f",   fps(),
+                    {warn_fps, bad_fps}, /*higher_is_better=*/true);
+        status_text("Frame:     ", "%.2f ms", frame_time_ms(),    frame_t);
+        status_text("1%% low:   ", "%.2f ms", one_percent_low_ms(),
+                    {frame_t.warn_above * 2.0f, frame_t.bad_above * 2.0f});
+
+        ImGui::TextDisabled("Target: %.1fms (%.0fHz monitor)",
+                            1000.0f / g.monitor_refresh_hz, g.monitor_refresh_hz);
 
         std::size_t count = 0;
         const float* history = frame_time_history(&count);
