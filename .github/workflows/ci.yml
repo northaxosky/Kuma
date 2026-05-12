@@ -35,6 +35,22 @@ jobs:
           cache: true
           stripdown: true
 
+      # Rust toolchain for kuma-bake. The engine has no runtime loaders
+      # for source-format assets - everything goes through the baker.
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.85"
+
+      - name: Cache Cargo registry + kuma-bake build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            build/tools/kuma-bake
+          key: cargo-${{ runner.os }}-${{ hashFiles('tools/kuma-bake/Cargo.lock') }}
+
       - name: Configure
         run: cmake -B build -S . -DKUMA_BUILD_TESTS=ON
 

@@ -21,24 +21,14 @@ public:
     bool init(void* gpu_context);
     void shutdown();
 
-    // Load a texture from an image file (PNG, JPG, etc.)
-    // Returns nullptr on failure. Caches by path — loading the same
-    // file twice returns the same texture.
-    const Texture* load_texture(const char* path);
-
     // Load a texture from a `.ktex` binary file produced by kuma-bake.
-    // Same caching semantics as load_texture. Returns nullptr on
-    // failure (file missing, bad magic, version mismatch,
-    // unsupported format, truncated payload).
+    // Returns nullptr on failure (file missing, bad magic, version
+    // mismatch, unsupported format, truncated payload). Caches by
+    // path - loading the same file twice returns the same texture.
     const Texture* load_texture_binary(const char* path);
 
-    // Load a mesh from a model file (OBJ, etc.)
-    // Returns nullptr on failure. Caches by path.
-    const Mesh* load_mesh(const char* path);
-
     // Load a mesh from a `.kmesh` binary file produced by kuma-bake.
-    // Same caching semantics as load_mesh. Returns nullptr on failure
-    // (file missing, bad magic, version mismatch, truncated payload).
+    // Returns nullptr on failure. Caches by path.
     const Mesh* load_mesh_binary(const char* path);
 
 private:

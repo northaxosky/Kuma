@@ -1,6 +1,10 @@
 // ── Resource Manager ────────────────────────────────────────────
 // Loads, caches, and manages GPU resources (textures, meshes).
 // Owns a GPU context (device, queue, etc.) to upload data to the GPU.
+//
+// All loaders consume the engine's binary asset format produced by
+// kuma-bake (.kmesh, .ktex). Source-format parsing (.obj, .png) is
+// the bake tool's job and never happens at runtime.
 
 #include <kuma/asset_format.h>
 #include <kuma/log.h>
@@ -15,13 +19,7 @@
 #include <vector>
 #include <vulkan/vulkan.h>
 
-#define STB_IMAGE_IMPLEMENTATION
-#include "../renderer/stb_image.h"
-
-#define TINYOBJLOADER_DISABLE_FAST_FLOAT
-#define TINYOBJLOADER_IMPLEMENTATION
 #include "../renderer/renderer_impl.h"
-#include "tiny_obj_loader.h"
 
 namespace kuma {
 
@@ -60,9 +58,7 @@ public:
         mesh_cache_.clear();
     }
 
-    const Texture* load_texture(const char* path);
     const Texture* load_texture_binary(const char* path);
-    const Mesh* load_mesh(const char* path);
     const Mesh* load_mesh_binary(const char* path);
 
     GpuContext gpu_;
@@ -78,16 +74,14 @@ private:
     void copy_buffer_to_image(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
 
     // Allocates host-visible+coherent memory and uploads the given
-    // bytes into a buffer of the requested usage. Used by both the
-    // mesh and (eventually) other binary loaders. Caller owns the
+    // bytes into a buffer of the requested usage. Caller owns the
     // returned VkBuffer + VkDeviceMemory and must free them on shutdown.
     bool upload_buffer(const void* data, VkDeviceSize size, VkBufferUsageFlags usage,
                        VkBuffer& out_buffer, VkDeviceMemory& out_memory);
 
     // Allocates a sampled 2D image, copies pixel bytes through a
     // staging buffer, transitions to SHADER_READ_ONLY_OPTIMAL, and
-    // creates the image view + sampler. Used by both load_texture
-    // (PNG/JPG path) and load_texture_binary (.ktex path).
+    // creates the image view + sampler.
     bool upload_texture(const void* pixels, uint32_t width, uint32_t height,
                         VkFormat format, Texture& out_texture);
 };
@@ -114,16 +108,8 @@ void ResourceManager::shutdown() {
     }
 }
 
-const Texture* ResourceManager::load_texture(const char* path) {
-    return impl_->load_texture(path);
-}
-
 const Texture* ResourceManager::load_texture_binary(const char* path) {
     return impl_->load_texture_binary(path);
-}
-
-const Mesh* ResourceManager::load_mesh(const char* path) {
-    return impl_->load_mesh(path);
 }
 
 const Mesh* ResourceManager::load_mesh_binary(const char* path) {
@@ -245,119 +231,6 @@ void ResourceManager::Impl::copy_buffer_to_image(VkBuffer buffer, VkImage image,
     vkCmdCopyBufferToImage(cmd, buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
     end_single_command(cmd);
-}
-
-// ── Texture Loading ─────────────────────────────────────────────
-
-const Texture* ResourceManager::Impl::load_texture(const char* path) {
-    auto it = texture_cache_.find(path);
-    if (it != texture_cache_.end()) {
-        return &it->second;
-    }
-
-    int tex_width = 0;
-    int tex_height = 0;
-    int tex_channels = 0;
-    stbi_uc* pixels = stbi_load(path, &tex_width, &tex_height, &tex_channels, STBI_rgb_alpha);
-    if (!pixels) {
-        kuma::log::error("Failed to load texture: %s (%s)", path, stbi_failure_reason());
-        return nullptr;
-    }
-
-    Texture texture{};
-    bool ok = upload_texture(pixels, static_cast<uint32_t>(tex_width),
-                             static_cast<uint32_t>(tex_height),
-                             VK_FORMAT_R8G8B8A8_SRGB, texture);
-    stbi_image_free(pixels);
-    if (!ok) {
-        return nullptr;
-    }
-
-    kuma::log::info("Texture loaded: %s (%ux%u)", path, texture.width, texture.height);
-    auto [inserted, _] = texture_cache_.emplace(path, texture);
-    return &inserted->second;
-}
-
-// ── Mesh Loading ────────────────────────────────────────────────
-
-const Mesh* ResourceManager::Impl::load_mesh(const char* path) {
-    // Check cache first
-    auto it = mesh_cache_.find(path);
-    if (it != mesh_cache_.end()) {
-        return &it->second;
-    }
-
-    // Parse the OBJ file using tinyobjloader
-    tinyobj::attrib_t attrib;
-    std::vector<tinyobj::shape_t> shapes;
-    std::vector<tinyobj::material_t> materials;
-    std::string warn;
-    std::string err;
-
-    if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, path)) {
-        kuma::log::error("Failed to load mesh: %s (%s)", path, err.c_str());
-        return nullptr;
-    }
-
-    if (!warn.empty()) {
-        kuma::log::warn("OBJ warning: %s", warn.c_str());
-    }
-
-    // Build vertex and index arrays from the parsed data.
-    // OBJ stores positions and UVs in separate arrays, then references
-    // them by index in each face. We need to combine them into our
-    // interleaved Vertex format.
-    std::vector<Vertex> vertices;
-    std::vector<uint16_t> indices;
-
-    for (const auto& shape : shapes) {
-        for (const auto& index : shape.mesh.indices) {
-            Vertex vertex{};
-
-            vertex.pos[0] = attrib.vertices[3 * index.vertex_index + 0];
-            vertex.pos[1] = attrib.vertices[3 * index.vertex_index + 1];
-            vertex.pos[2] = attrib.vertices[3 * index.vertex_index + 2];
-
-            if (index.texcoord_index >= 0) {
-                vertex.uv[0] = attrib.texcoords[2 * index.texcoord_index + 0];
-                // OBJ has V=0 at bottom, Vulkan has V=0 at top - flip it.
-                vertex.uv[1] = 1.0f - attrib.texcoords[2 * index.texcoord_index + 1];
-            }
-
-            // Normal: fill in if present, otherwise default to +Y.
-            if (index.normal_index >= 0) {
-                vertex.normal[0] = attrib.normals[3 * index.normal_index + 0];
-                vertex.normal[1] = attrib.normals[3 * index.normal_index + 1];
-                vertex.normal[2] = attrib.normals[3 * index.normal_index + 2];
-            } else {
-                vertex.normal[1] = 1.0f;
-            }
-
-            indices.push_back(static_cast<uint16_t>(vertices.size()));
-            vertices.push_back(vertex);
-        }
-    }
-
-    // Upload vertex + index data to GPU.
-    Mesh mesh{};
-    mesh.index_count = static_cast<uint32_t>(indices.size());
-
-    if (!upload_buffer(vertices.data(), sizeof(Vertex) * vertices.size(),
-                       VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                       mesh.vertex_buffer, mesh.vertex_memory)) {
-        return nullptr;
-    }
-    if (!upload_buffer(indices.data(), sizeof(uint16_t) * indices.size(),
-                       VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-                       mesh.index_buffer, mesh.index_memory)) {
-        return nullptr;
-    }
-
-    kuma::log::info("Mesh loaded: %s (%zu vertices, %u indices)", path, vertices.size(),
-                    mesh.index_count);
-
-    auto [inserted, _] = mesh_cache_.emplace(path, mesh);
-    return &inserted->second;
 }
 
 // ── Binary mesh loader (.kmesh produced by kuma-bake) ───────────

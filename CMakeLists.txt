@@ -33,16 +33,15 @@ FetchContent_MakeAvailable(SDL3)
 find_package(Vulkan REQUIRED)
 
 # ── Rust toolchain (kuma-bake) ───────────────────────────────────
-# kuma-bake is a Rust binary that bakes source assets (.obj, .png)
-# into the engine's runtime binary format. Soft-required for now;
-# a later commit will upgrade this to FATAL_ERROR once the engine's
-# old OBJ/PNG loaders are removed.
+# kuma-bake is the offline asset baker that produces the engine's
+# binary asset format (.kmesh, .ktex). The engine has no runtime
+# loaders for source formats - if it's not baked, it can't load.
+# Hard-required.
 find_program(CARGO_EXECUTABLE cargo)
 if(NOT CARGO_EXECUTABLE)
-    message(WARNING
-        "Cargo (Rust) not found - kuma-bake will not be built. "
-        "Install Rust from https://rustup.rs to enable asset baking. "
-        "This will become a hard requirement in a future commit.")
+    message(FATAL_ERROR
+        "Cargo (Rust) not found - required to build kuma-bake. "
+        "Install Rust >= 1.85 from https://rustup.rs and re-run cmake.")
 endif()
 
 # ── Dear ImGui ────────────────────────────────────────────────────
@@ -77,10 +76,7 @@ target_link_libraries(imgui PUBLIC SDL3::SDL3 Vulkan::Vulkan)
 
 # ── Sub-projects ─────────────────────────────────────────────────
 add_subdirectory(engine)
-
-if(CARGO_EXECUTABLE)
-    add_subdirectory(tools/kuma-bake)
-endif()
+add_subdirectory(tools/kuma-bake)
 
 if(KUMA_BUILD_SANDBOX)
     add_subdirectory(sandbox)

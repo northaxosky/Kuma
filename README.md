@@ -21,6 +21,7 @@ Kuma is designed for small, indie games — prioritizing simplicity, modularity,
 - **Transform** — position + quaternion rotation + scale, producing a model matrix; sandbox spins the quad to demo
 - **ECS** — sparse-set Registry with generational EntityID handles, sparse-set component storage, and `view<T...>()` queries with structured bindings; sandbox demos a 100-entity grid driven by spin + render systems
 - **Debug overlay** — Dear ImGui integration with a custom Kuma Dark style and Cascadia Mono font; F3 toggles a default panel (FPS, frame time, 1% low, 60-frame sparkline). Game code calls `ImGui::*` directly for custom panels.
+- **Asset pipeline** — `kuma-bake` (Rust) converts source assets (.obj, .png, .jpg, .tga) into the engine's binary format (.kmesh, .ktex). Engine loads only baked binaries at runtime; no source-format parsing in the hot path.
 - **Input** — keyboard & mouse polling with edge detection (pressed/released this frame)
 - **Time** — monotonic delta / total / frame count with anti-spiral clamp
 - **Frame orchestration** — engine-owned `begin_frame()` / `end_frame()` wrapping a 5-phase contract (input → time → update → render → present)
@@ -28,10 +29,10 @@ Kuma is designed for small, indie games — prioritizing simplicity, modularity,
 
 ### What's Next
 
-- Rust asset converter (offline binary mesh/texture format - first Rust module)
 - Audio
 - Physics
 - Renderer batching / instancing (when entity counts make per-entity draw calls a real cost; observed at >1000 entities)
+- glTF support, texture compression (BC7/BC5), mipmaps in `kuma-bake`
 
 ## Contributing
 
@@ -46,6 +47,7 @@ SDL/Vulkan types.
 - CMake 3.24+
 - C++20 compiler (MSVC 2022, GCC 12+, or Clang 15+)
 - Vulkan SDK
+- Rust 1.85+ (for the `kuma-bake` asset baker - install via [rustup](https://rustup.rs))
 
 ### Build & Run
 
@@ -56,6 +58,10 @@ cmake --build build --config Debug
 ```
 
 Or in VS Code: press **F5** (launch.json and tasks.json are included).
+
+`cmake --build` invokes `cargo` automatically to build `kuma-bake` and bakes
+the sandbox's source assets into the engine binary format (`.kmesh`, `.ktex`)
+before linking the sandbox executable.
 
 ## Project Structure
 
