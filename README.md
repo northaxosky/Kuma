@@ -20,6 +20,7 @@ Kuma is designed for small, indie games — prioritizing simplicity, modularity,
 - **Camera** — reusable perspective camera plus keyboard/RMB-look free-fly controller in the sandbox
 - **Transform** — position + quaternion rotation + scale, producing a model matrix; sandbox spins the quad to demo
 - **ECS** — sparse-set Registry with generational EntityID handles, sparse-set component storage, and `view<T...>()` queries with structured bindings; sandbox demos a 100-entity grid driven by spin + render systems
+- **Debug overlay** — Dear ImGui integration with a custom Kuma Dark style and Cascadia Mono font; F3 toggles a default panel (FPS, frame time, 1% low, 60-frame sparkline). Game code calls `ImGui::*` directly for custom panels.
 - **Input** — keyboard & mouse polling with edge detection (pressed/released this frame)
 - **Time** — monotonic delta / total / frame count with anti-spiral clamp
 - **Frame orchestration** — engine-owned `begin_frame()` / `end_frame()` wrapping a 5-phase contract (input → time → update → render → present)
@@ -27,9 +28,10 @@ Kuma is designed for small, indie games — prioritizing simplicity, modularity,
 
 ### What's Next
 
-- Audio, physics
-- Rust asset converter (offline tool for binary mesh/texture formats)
-- Renderer batching / instancing (when entity counts make per-entity draw calls a real cost)
+- Rust asset converter (offline binary mesh/texture format - first Rust module)
+- Audio
+- Physics
+- Renderer batching / instancing (when entity counts make per-entity draw calls a real cost; observed at >1000 entities)
 
 ## Contributing
 
