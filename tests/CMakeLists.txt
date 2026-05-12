@@ -22,6 +22,7 @@ FetchContent_MakeAvailable(googletest)
 add_executable(kuma-tests
     math_test.cpp
     camera_test.cpp
+    debug_test.cpp
     ecs_test.cpp
     input_test.cpp
     time_test.cpp

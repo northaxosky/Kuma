@@ -1,4 +1,5 @@
 #include "core/debug_internal.h"
+#include "core/debug_test_hooks.h"
 
 #include <kuma/input.h>
 #include <kuma/log.h>
@@ -28,9 +29,112 @@ struct DebugState {
 
     VkDevice device = VK_NULL_HANDLE;
     VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
+
+    // Stats. Keep ~120 samples (2 seconds @ 60fps) for the sparkline.
+    static constexpr std::size_t kHistoryCapacity = 120;
+    std::array<float, kHistoryCapacity> frame_ms_history{};   // ring buffer, ms
+    std::size_t history_count = 0;       // how many slots are valid
+    std::size_t history_head = 0;        // next write index
+
+    // Exponential moving average smoothing. Smoothing factor chosen so
+    // ~95% of weight comes from the last second of frames at 60fps
+    // (alpha = 1 - exp(-dt / 0.5s)).
+    float smoothed_frame_ms = 0.0f;
 };
 
 DebugState g;
+
+// ── Stats helpers (pure functions, hammered by tests) ──────────
+
+// Append a frame-time sample (in ms) to the ring buffer. When the
+// buffer is full, oldest samples are overwritten.
+void record_frame_sample(float frame_ms) {
+    g.frame_ms_history[g.history_head] = frame_ms;
+    g.history_head = (g.history_head + 1) % DebugState::kHistoryCapacity;
+    if (g.history_count < DebugState::kHistoryCapacity) {
+        ++g.history_count;
+    }
+
+    // EMA smoothing. Half-life ~0.5s -> alpha computed from frame_ms.
+    if (g.smoothed_frame_ms == 0.0f) {
+        g.smoothed_frame_ms = frame_ms;  // bootstrap on first sample
+    } else {
+        constexpr float kHalfLifeSec = 0.5f;
+        const float dt_sec = frame_ms / 1000.0f;
+        const float alpha = 1.0f - std::exp(-dt_sec / kHalfLifeSec);
+        g.smoothed_frame_ms += (frame_ms - g.smoothed_frame_ms) * alpha;
+    }
+}
+
+// Linearize the ring buffer into a contiguous oldest-first array
+// for plotting. Cached between calls (rebuilt only when history_head
+// changes, which is once per frame).
+const float* linearize_history(std::size_t* out_count) {
+    static std::array<float, DebugState::kHistoryCapacity> linear{};
+    static std::size_t cached_head = SIZE_MAX;
+    static std::size_t cached_count = 0;
+
+    if (g.history_head != cached_head || g.history_count != cached_count) {
+        cached_head = g.history_head;
+        cached_count = g.history_count;
+        if (g.history_count < DebugState::kHistoryCapacity) {
+            // Buffer not yet full - history starts at index 0.
+            for (std::size_t i = 0; i < g.history_count; ++i) {
+                linear[i] = g.frame_ms_history[i];
+            }
+        } else {
+            // Buffer full - oldest is at history_head (the next write slot).
+            for (std::size_t i = 0; i < DebugState::kHistoryCapacity; ++i) {
+                linear[i] = g.frame_ms_history[(g.history_head + i) % DebugState::kHistoryCapacity];
+            }
+        }
+    }
+
+    if (out_count) *out_count = g.history_count;
+    return linear.data();
+}
+
+// 1% low = average of the worst (slowest = highest ms) 1% of recent
+// samples. With 120 samples that's ~1-2 frames; we floor at 1.
+float compute_one_percent_low_ms() {
+    if (g.history_count == 0) return 0.0f;
+
+    std::array<float, DebugState::kHistoryCapacity> sorted{};
+    for (std::size_t i = 0; i < g.history_count; ++i) {
+        sorted[i] = g.frame_ms_history[i];
+    }
+    std::sort(sorted.begin(), sorted.begin() + g.history_count, std::greater<float>{});
+
+    const std::size_t n = std::max<std::size_t>(1, g.history_count / 100);
+    float sum = 0.0f;
+    for (std::size_t i = 0; i < n; ++i) sum += sorted[i];
+    return sum / static_cast<float>(n);
+}
+
+// Test-visible helpers - exposed via the detail::debug_stats_for_testing
+// namespace below so unit tests can drive them without ImGui being
+// initialized. Production code paths call these through new_frame().
+void reset_stats() {
+    g.frame_ms_history.fill(0.0f);
+    g.history_count = 0;
+    g.history_head = 0;
+    g.smoothed_frame_ms = 0.0f;
+}
+
+}  // namespace
+
+namespace detail {
+
+// Test hooks - not in the public header. Tests #include this file
+// path or reach via debug_internal.h to call these directly. Keeps
+// the production API clean while letting us hammer the pure math.
+void debug_record_frame_sample_for_test(float frame_ms) { record_frame_sample(frame_ms); }
+void debug_reset_stats_for_test() { reset_stats(); }
+void debug_set_initialized_for_test(bool v) { g.initialized = v; }
+
+}  // namespace detail
+
+namespace {
 
 void apply_kuma_dark_style() {
     ImGuiStyle& s = ImGui::GetStyle();
@@ -225,14 +329,22 @@ bool is_visible()              { return g.visible; }
 void toggle()                  { g.visible = !g.visible; }
 void set_toggle_key(Key key)   { g.toggle_key = key; }
 
-// ── Stats stubs (filled in commit 4) ───────────────────────────
+// ── Stats accessors ────────────────────────────────────────────
 
-float fps()                  { return 0.0f; }
-float frame_time_ms()        { return 0.0f; }
-float one_percent_low_ms()   { return 0.0f; }
+float fps() {
+    return g.smoothed_frame_ms > 0.0f ? 1000.0f / g.smoothed_frame_ms : 0.0f;
+}
+
+float frame_time_ms() {
+    return g.smoothed_frame_ms;
+}
+
+float one_percent_low_ms() {
+    return compute_one_percent_low_ms();
+}
+
 const float* frame_time_history(std::size_t* out_count) {
-    if (out_count) *out_count = 0;
-    return nullptr;
+    return linearize_history(out_count);
 }
 
 // ── Frame integration ──────────────────────────────────────────
@@ -244,6 +356,13 @@ void process_event(const SDL_Event& event) {
 
 void new_frame() {
     if (!g.initialized) return;
+
+    // Record the frame time first so stats reflect "previous frame".
+    // delta() is 0 on frame 1 (no previous) - skip recording then.
+    const float dt_ms = kuma::time::delta() * 1000.0f;
+    if (dt_ms > 0.0f) {
+        record_frame_sample(dt_ms);
+    }
 
     // F3 (or whatever toggle key is configured) flips visibility.
     // Done AFTER input::begin_frame has snapshotted edges, BEFORE
