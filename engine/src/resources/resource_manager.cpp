@@ -286,31 +286,16 @@ const Mesh* ResourceManager::Impl::load_mesh_binary(const char* path) {
     std::vector<char> bytes(static_cast<size_t>(size));
     f.read(bytes.data(), size);
 
-    if (bytes.size() < sizeof(asset_format::KMeshHeader)) {
-        kuma::log::error("kmesh too small: %s", path);
-        return nullptr;
-    }
-
     asset_format::KMeshHeader hdr{};
-    std::memcpy(&hdr, bytes.data(), sizeof(hdr));
-
-    if (hdr.magic != asset_format::kMagicKMesh) {
-        kuma::log::error("kmesh bad magic 0x%08x: %s", hdr.magic, path);
-        return nullptr;
-    }
-    if (hdr.version != asset_format::kKMeshVersion) {
-        kuma::log::error("kmesh version mismatch (file %u, engine %u): %s", hdr.version,
-                         asset_format::kKMeshVersion, path);
+    const asset_format::ParseResult pr =
+        asset_format::parse_kmesh_header(bytes.data(), bytes.size(), hdr);
+    if (pr != asset_format::ParseResult::Ok) {
+        kuma::log::error("kmesh parse failed (%d): %s", static_cast<int>(pr), path);
         return nullptr;
     }
 
-    const VkDeviceSize vertex_bytes = hdr.vertex_count * sizeof(Vertex);
-    const VkDeviceSize index_bytes  = hdr.index_count * sizeof(uint16_t);
-    if (hdr.vertex_offset + vertex_bytes > bytes.size() ||
-        hdr.index_offset + index_bytes > bytes.size()) {
-        kuma::log::error("kmesh truncated: %s", path);
-        return nullptr;
-    }
+    const VkDeviceSize vertex_bytes = static_cast<VkDeviceSize>(hdr.vertex_count) * sizeof(Vertex);
+    const VkDeviceSize index_bytes  = static_cast<VkDeviceSize>(hdr.index_count) * sizeof(uint16_t);
 
     Mesh mesh{};
     mesh.index_count = hdr.index_count;
@@ -443,31 +428,11 @@ const Texture* ResourceManager::Impl::load_texture_binary(const char* path) {
     std::vector<char> bytes(static_cast<size_t>(size));
     f.read(bytes.data(), size);
 
-    if (bytes.size() < sizeof(asset_format::KTexHeader)) {
-        kuma::log::error("ktex too small: %s", path);
-        return nullptr;
-    }
-
     asset_format::KTexHeader hdr{};
-    std::memcpy(&hdr, bytes.data(), sizeof(hdr));
-
-    if (hdr.magic != asset_format::kMagicKTex) {
-        kuma::log::error("ktex bad magic 0x%08x: %s", hdr.magic, path);
-        return nullptr;
-    }
-    if (hdr.version != asset_format::kKTexVersion) {
-        kuma::log::error("ktex version mismatch (file %u, engine %u): %s", hdr.version,
-                         asset_format::kKTexVersion, path);
-        return nullptr;
-    }
-    if (hdr.format != asset_format::kFormatRGBA8) {
-        kuma::log::error("ktex unsupported format %u: %s", hdr.format, path);
-        return nullptr;
-    }
-
-    const VkDeviceSize pixel_bytes = static_cast<VkDeviceSize>(hdr.width) * hdr.height * 4;
-    if (hdr.pixel_offset + pixel_bytes > bytes.size()) {
-        kuma::log::error("ktex truncated: %s", path);
+    const asset_format::ParseResult pr =
+        asset_format::parse_ktex_header(bytes.data(), bytes.size(), hdr);
+    if (pr != asset_format::ParseResult::Ok) {
+        kuma::log::error("ktex parse failed (%d): %s", static_cast<int>(pr), path);
         return nullptr;
     }
 

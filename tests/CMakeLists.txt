@@ -28,6 +28,7 @@ add_executable(kuma-tests
     input_test.cpp
     time_test.cpp
     transform_test.cpp
+    integration/asset_format_test.cpp
     integration/asset_pipeline_test.cpp
 )
 

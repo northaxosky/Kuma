@@ -9,6 +9,7 @@
 // The static_asserts below catch size drift at C++ compile time;
 // field reordering must be caught by careful review.
 
+#include <cstddef>
 #include <cstdint>
 
 namespace kuma::asset_format {
@@ -58,5 +59,31 @@ struct KTexHeader {
 };
 static_assert(sizeof(KTexHeader) == 32,
               "KTexHeader layout must match tools/kuma-bake/src/format.rs");
+
+// ── Pure parsers (no Vulkan, no I/O) ────────────────────────────
+// Validate the header + slice layout of an in-memory .kmesh /
+// .ktex blob. Engine loaders call these before doing any GPU
+// upload; integration tests drive them with hand-crafted byte
+// buffers to exercise corruption cases (bad magic, bad version,
+// truncated payload, offset overlap, integer overflow risk).
+//
+// On Ok, `out_header` is populated and the payload byte ranges
+// `[header.vertex_offset, +vertex_count*sizeof(Vertex))` etc. are
+// guaranteed in-bounds. On any other result, out_header contents
+// are unspecified and callers must not deref the payload offsets.
+
+enum class ParseResult {
+    Ok,
+    TooSmall,           // buffer < sizeof(header)
+    BadMagic,           // first 4 bytes != expected magic
+    VersionMismatch,    // version field != current version
+    UnsupportedFormat,  // (KTex only) format field not in known set
+    OffsetOutOfBounds,  // vertex/index/pixel slice extends past buffer
+    OffsetOverlap,      // vertex slice overlaps with index slice
+    PayloadOverflow,    // count * sizeof(elem) overflows or exceeds buffer
+};
+
+ParseResult parse_kmesh_header(const void* data, size_t size, KMeshHeader& out_header);
+ParseResult parse_ktex_header(const void* data, size_t size, KTexHeader& out_header);
 
 }  // namespace kuma::asset_format
