@@ -185,4 +185,128 @@ inline Mat4 operator*(const Mat4& a, const Mat4& b) {
     return result;
 }
 
+// ── Quat ────────────────────────────────────────────────────────
+// Unit quaternion representing a 3D rotation. Storage is (x, y, z, w)
+// matching GLM, Unity, and the glTF spec - w is the scalar part.
+//
+// Build via factories (from_axis_angle / from_euler), not by writing
+// raw components. Multiplying composes rotations: (a * b) means
+// "rotate by b, then by a" (same convention as Mat4).
+
+struct Quat;
+inline Quat operator*(const Quat& a, const Quat& b);
+
+struct Quat {
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+    float w = 1.0f;  // identity
+
+    Quat() = default;
+    Quat(float x, float y, float z, float w) : x(x), y(y), z(z), w(w) {}
+
+    static Quat identity() { return {0.0f, 0.0f, 0.0f, 1.0f}; }
+
+    // Encodes "rotate by angle around axis" using the half-angle form.
+    // Caller is responsible for passing a unit-length axis.
+    static Quat from_axis_angle(const Vec3& axis, float angle_radians) {
+        float half = angle_radians * 0.5f;
+        float s = std::sin(half);
+        return {axis.x * s, axis.y * s, axis.z * s, std::cos(half)};
+    }
+
+    // Yaw=Y, pitch=X, roll=Z. Composed q_yaw * q_pitch * q_roll, so the
+    // applied order to vectors is roll -> pitch -> yaw (right-to-left).
+    static Quat from_euler(float yaw, float pitch, float roll) {
+        Quat qy = from_axis_angle({0.0f, 1.0f, 0.0f}, yaw);
+        Quat qx = from_axis_angle({1.0f, 0.0f, 0.0f}, pitch);
+        Quat qz = from_axis_angle({0.0f, 0.0f, 1.0f}, roll);
+        return qy * qx * qz;
+    }
+
+    // Build the equivalent 3x3 rotation matrix, padded into a Mat4.
+    // Assumes the quaternion is unit-length.
+    Mat4 to_mat4() const {
+        float xx = x * x, yy = y * y, zz = z * z;
+        float xy = x * y, xz = x * z, yz = y * z;
+        float wx = w * x, wy = w * y, wz = w * z;
+
+        Mat4 m = Mat4::identity();
+        m(0, 0) = 1.0f - 2.0f * (yy + zz);
+        m(0, 1) = 2.0f * (xy - wz);
+        m(0, 2) = 2.0f * (xz + wy);
+        m(1, 0) = 2.0f * (xy + wz);
+        m(1, 1) = 1.0f - 2.0f * (xx + zz);
+        m(1, 2) = 2.0f * (yz - wx);
+        m(2, 0) = 2.0f * (xz - wy);
+        m(2, 1) = 2.0f * (yz + wx);
+        m(2, 2) = 1.0f - 2.0f * (xx + yy);
+        return m;
+    }
+
+    // Rotate a vector directly. Equivalent to (q.to_mat4() * v) but
+    // skips the matrix build. Uses the identity:
+    //   v' = v + 2 * cross(q.xyz, cross(q.xyz, v) + q.w * v)
+    Vec3 rotate(const Vec3& v) const {
+        Vec3 q_xyz{x, y, z};
+        Vec3 t = cross(q_xyz, v) * 2.0f;
+        return v + (t * w) + cross(q_xyz, t);
+    }
+
+    // Rescale to unit length. Float drift after many multiplies makes
+    // this important to call periodically on long-lived rotations.
+    Quat normalized() const {
+        float len = std::sqrt(x * x + y * y + z * z + w * w);
+        if (len == 0.0f)
+            return identity();
+        float inv = 1.0f / len;
+        return {x * inv, y * inv, z * inv, w * inv};
+    }
+};
+
+// Hamilton product. (a * b) means "rotate by b, then by a".
+inline Quat operator*(const Quat& a, const Quat& b) {
+    return {
+        a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+        a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+        a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+        a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
+    };
+}
+
+// Spherical linear interpolation. Takes the shortest arc by flipping
+// b if the dot product is negative (q and -q represent the same
+// rotation, but the interpolation path between them isn't the same).
+inline Quat slerp(const Quat& a, const Quat& b, float t) {
+    float cos_theta = a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
+
+    Quat b_adj = b;
+    if (cos_theta < 0.0f) {
+        b_adj = {-b.x, -b.y, -b.z, -b.w};
+        cos_theta = -cos_theta;
+    }
+
+    // Near-parallel: fall back to lerp + normalize to avoid divide-by-near-zero.
+    if (cos_theta > 0.9995f) {
+        Quat r{
+            a.x + t * (b_adj.x - a.x),
+            a.y + t * (b_adj.y - a.y),
+            a.z + t * (b_adj.z - a.z),
+            a.w + t * (b_adj.w - a.w),
+        };
+        return r.normalized();
+    }
+
+    float theta = std::acos(cos_theta);
+    float sin_theta = std::sin(theta);
+    float wa = std::sin((1.0f - t) * theta) / sin_theta;
+    float wb = std::sin(t * theta) / sin_theta;
+    return {
+        wa * a.x + wb * b_adj.x,
+        wa * a.y + wb * b_adj.y,
+        wa * a.z + wb * b_adj.z,
+        wa * a.w + wb * b_adj.w,
+    };
+}
+
 }  // namespace kuma

@@ -551,3 +551,141 @@ TEST(Mat4, MvpOfOriginVertexProducesExpectedClipSpace) {
     EXPECT_NEAR(c[1] / c[3], 0.0f, kEps);
     EXPECT_NEAR(c[2] / c[3], 8.0f / 9.0f, kEps);
 }
+
+// ── Quat ────────────────────────────────────────────────────────────
+// Quaternions encode rotations. The tests below use canonical
+// rotations (90 degrees around a single axis) because their results
+// can be reasoned about by hand, then check that the higher-level
+// operations (multiply, slerp, rotate) agree with each other.
+
+namespace {
+
+using kuma::Quat;
+using kuma::slerp;
+
+constexpr float kPi    = 3.14159265358979323846f;
+constexpr float kHalfPi = kPi * 0.5f;
+
+::testing::AssertionResult Vec3Near(const Vec3& a, const Vec3& b, float eps = kEps) {
+    if (std::fabs(a.x - b.x) > eps || std::fabs(a.y - b.y) > eps ||
+        std::fabs(a.z - b.z) > eps) {
+        return ::testing::AssertionFailure()
+            << "Vec3 mismatch: (" << a.x << "," << a.y << "," << a.z << ") vs ("
+            << b.x << "," << b.y << "," << b.z << ")";
+    }
+    return ::testing::AssertionSuccess();
+}
+
+}  // namespace
+
+TEST(Quat, IdentityIsZeroXYZAndOneW) {
+    Quat q = Quat::identity();
+    EXPECT_FLOAT_EQ(q.x, 0.0f);
+    EXPECT_FLOAT_EQ(q.y, 0.0f);
+    EXPECT_FLOAT_EQ(q.z, 0.0f);
+    EXPECT_FLOAT_EQ(q.w, 1.0f);
+}
+
+TEST(Quat, IdentityToMat4IsIdentity) {
+    EXPECT_TRUE(MatricesNear(Quat::identity().to_mat4(), Mat4::identity()));
+}
+
+TEST(Quat, FromAxisAngleZeroIsIdentity) {
+    // Rotating by 0 around any axis must produce the identity.
+    Quat q = Quat::from_axis_angle({0, 1, 0}, 0.0f);
+    EXPECT_NEAR(q.x, 0.0f, kEps);
+    EXPECT_NEAR(q.y, 0.0f, kEps);
+    EXPECT_NEAR(q.z, 0.0f, kEps);
+    EXPECT_NEAR(q.w, 1.0f, kEps);
+}
+
+TEST(Quat, FromAxisAngleY90RotatesXToMinusZ) {
+    // Right-hand rule: thumb along +Y, +X curls toward -Z.
+    Quat q = Quat::from_axis_angle({0, 1, 0}, kHalfPi);
+    EXPECT_TRUE(Vec3Near(q.rotate({1, 0, 0}), {0, 0, -1}));
+}
+
+TEST(Quat, FromAxisAngleX90RotatesYToZ) {
+    // Right-hand rule: thumb along +X, +Y curls toward +Z.
+    Quat q = Quat::from_axis_angle({1, 0, 0}, kHalfPi);
+    EXPECT_TRUE(Vec3Near(q.rotate({0, 1, 0}), {0, 0, 1}));
+}
+
+TEST(Quat, FromEulerYawOnlyMatchesAxisAngleY) {
+    // Pure yaw with zero pitch/roll must equal a single Y-axis rotation.
+    Quat from_e = Quat::from_euler(kHalfPi, 0.0f, 0.0f);
+    Quat from_a = Quat::from_axis_angle({0, 1, 0}, kHalfPi);
+    EXPECT_TRUE(Vec3Near(from_e.rotate({1, 0, 0}), from_a.rotate({1, 0, 0})));
+}
+
+TEST(Quat, MultiplyByIdentityIsNoOp) {
+    Quat q = Quat::from_axis_angle({0, 1, 0}, 1.234f);
+    Quat r = q * Quat::identity();
+    EXPECT_NEAR(r.x, q.x, kEps);
+    EXPECT_NEAR(r.y, q.y, kEps);
+    EXPECT_NEAR(r.z, q.z, kEps);
+    EXPECT_NEAR(r.w, q.w, kEps);
+}
+
+TEST(Quat, MultiplyTwo90sAroundSameAxisIs180) {
+    // Two 90-deg yaws should equal one 180-deg yaw: (1,0,0) -> (-1,0,0).
+    Quat q90  = Quat::from_axis_angle({0, 1, 0}, kHalfPi);
+    Quat q180 = q90 * q90;
+    EXPECT_TRUE(Vec3Near(q180.rotate({1, 0, 0}), {-1, 0, 0}));
+}
+
+TEST(Quat, RotateMatchesMatrixConversion) {
+    // The hand-rolled rotate() must agree with the matrix conversion.
+    Quat q = Quat::from_euler(0.7f, -0.3f, 1.1f);
+    Vec3 v{0.5f, 1.5f, -2.0f};
+
+    Vec3 by_rotate = q.rotate(v);
+
+    Mat4 m = q.to_mat4();
+    Vec3 by_matrix{
+        m(0, 0) * v.x + m(0, 1) * v.y + m(0, 2) * v.z,
+        m(1, 0) * v.x + m(1, 1) * v.y + m(1, 2) * v.z,
+        m(2, 0) * v.x + m(2, 1) * v.y + m(2, 2) * v.z,
+    };
+
+    EXPECT_TRUE(Vec3Near(by_rotate, by_matrix));
+}
+
+TEST(Quat, NormalizedIsUnitLength) {
+    Quat q{1.0f, 2.0f, 3.0f, 4.0f};
+    Quat n = q.normalized();
+    float len = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z + n.w * n.w);
+    EXPECT_NEAR(len, 1.0f, kEps);
+}
+
+TEST(Quat, NormalizedZeroFallsBackToIdentity) {
+    Quat n = Quat{0, 0, 0, 0}.normalized();
+    EXPECT_FLOAT_EQ(n.w, 1.0f);
+}
+
+TEST(Quat, SlerpAtZeroReturnsA) {
+    Quat a = Quat::from_axis_angle({0, 1, 0}, 0.4f);
+    Quat b = Quat::from_axis_angle({0, 1, 0}, 1.7f);
+    Quat r = slerp(a, b, 0.0f);
+    EXPECT_TRUE(Vec3Near(r.rotate({1, 0, 0}), a.rotate({1, 0, 0})));
+}
+
+TEST(Quat, SlerpAtOneReturnsB) {
+    Quat a = Quat::from_axis_angle({0, 1, 0}, 0.4f);
+    Quat b = Quat::from_axis_angle({0, 1, 0}, 1.7f);
+    Quat r = slerp(a, b, 1.0f);
+    EXPECT_TRUE(Vec3Near(r.rotate({1, 0, 0}), b.rotate({1, 0, 0})));
+}
+
+TEST(Quat, SlerpHalfwayInterpolatesAngle) {
+    // Slerp from identity to a 90-deg yaw at t=0.5 should be a 45-deg yaw.
+    // 45-deg around +Y sends +X to (cos45, 0, -sin45) = (0.7071, 0, -0.7071).
+    // Avoids the 180-deg degenerate case where +Y and -Y are both valid axes.
+    Quat a = Quat::identity();
+    Quat b = Quat::from_axis_angle({0, 1, 0}, kHalfPi);
+    Quat r = slerp(a, b, 0.5f);
+    Vec3 rotated = r.rotate({1, 0, 0});
+    EXPECT_NEAR(rotated.x, 0.7071068f, 1e-4f);
+    EXPECT_NEAR(rotated.y, 0.0f, 1e-4f);
+    EXPECT_NEAR(rotated.z, -0.7071068f, 1e-4f);
+}
