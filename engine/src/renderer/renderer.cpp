@@ -75,6 +75,11 @@ void* Renderer::gpu_context() {
     return &ctx;
 }
 
+void* Renderer::imgui_init_context() {
+    static debug::InitContext ctx = impl_->imgui_init_context();
+    return &ctx;
+}
+
 // ── RendererImpl Init/Shutdown ──────────────────────────────────
 
 bool RendererImpl::init(const RendererConfig& config) {
@@ -288,6 +293,20 @@ void RendererImpl::on_resize(int32_t width, int32_t height) {
 
 GpuContext RendererImpl::gpu_context() const {
     return GpuContext{device_, physical_device_, command_pool_, graphics_queue_};
+}
+
+debug::InitContext RendererImpl::imgui_init_context() const {
+    debug::InitContext ctx{};
+    ctx.instance         = instance_;
+    ctx.physical_device  = physical_device_;
+    ctx.device           = device_;
+    ctx.queue_family     = queue_family_index_;
+    ctx.queue            = graphics_queue_;
+    ctx.render_pass      = render_pass_;
+    ctx.image_count      = static_cast<uint32_t>(swapchain_images_.size());
+    ctx.min_image_count  = 2;
+    ctx.sdl_window       = window_;
+    return ctx;
 }
 
 void RendererImpl::set_mesh(const Mesh* mesh) {

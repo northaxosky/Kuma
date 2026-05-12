@@ -5,6 +5,7 @@
 
 #include <SDL3/SDL.h>
 
+#include "core/debug_internal.h"
 #include "platform/paths.h"
 
 namespace kuma {
@@ -83,11 +84,20 @@ bool init(const EngineConfig& config) {
     s_renderer.set_mesh(mesh);
     s_renderer.set_texture(texture);
 
+    // Debug overlay needs the renderer's Vulkan handles + SDL window.
+    // Init AFTER the renderer (so the device exists) but before the
+    // first frame so process_event has somewhere to send SDL events.
+    auto* imgui_ctx = static_cast<debug::InitContext*>(s_renderer.imgui_init_context());
+    if (!debug::init(*imgui_ctx)) {
+        kuma::log::warn("Debug overlay init failed; continuing without it");
+    }
+
     return true;
 }
 
 void shutdown() {
     s_renderer.wait_idle();         // GPU finishes all work
+    debug::shutdown();              // tears down ImGui (must be before renderer)
     s_resource_manager.shutdown();  // safe to destroy textures/meshes
     s_renderer.shutdown();          // destroy Vulkan device last
     s_window.destroy();

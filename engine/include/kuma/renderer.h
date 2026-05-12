@@ -85,6 +85,11 @@ public:
     // Game code should not call this.
     void* gpu_context();
 
+    // Internal - returns opaque debug-overlay init context for the
+    // engine to forward into kuma::debug::init(). Game code should
+    // not call this.
+    void* imgui_init_context();
+
 private:
     RendererImpl* impl_ = nullptr;
 };

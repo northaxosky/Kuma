@@ -6,6 +6,7 @@ add_library(kuma-engine STATIC)
 # Source files — add new .cpp files here as we build systems
 target_sources(kuma-engine PRIVATE
     src/core/camera.cpp
+    src/core/debug.cpp
     src/core/ecs.cpp
     src/core/engine.cpp
     src/core/log.cpp

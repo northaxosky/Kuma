@@ -7,6 +7,8 @@
 #include <kuma/log.h>
 #include <kuma/renderer.h>
 
+#include "core/debug_internal.h"
+
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 #include <algorithm>
@@ -86,6 +88,10 @@ public:
     void end_frame();
     void on_resize(int32_t width, int32_t height);
     GpuContext gpu_context() const;
+
+    // Build the bundle of Vulkan handles ImGui needs for init.
+    // Cached on first call (assumed stable for the renderer's lifetime).
+    debug::InitContext imgui_init_context() const;
 
     // Set resources loaded by the resource manager
     void set_texture(const Texture* texture);
