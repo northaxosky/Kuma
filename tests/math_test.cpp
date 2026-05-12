@@ -370,6 +370,26 @@ TEST(Mat4, TranslatesCompose) {
     EXPECT_TRUE(MatricesNear(composed, expected));
 }
 
+TEST(Mat4, ScaleSetsDiagonal) {
+    Mat4 m = Mat4::scale(2, 3, 4);
+    EXPECT_FLOAT_EQ(m(0, 0), 2.0f);
+    EXPECT_FLOAT_EQ(m(1, 1), 3.0f);
+    EXPECT_FLOAT_EQ(m(2, 2), 4.0f);
+    EXPECT_FLOAT_EQ(m(3, 3), 1.0f);  // homogeneous w stays 1
+}
+
+TEST(Mat4, ScaleStretchesPoint) {
+    auto p = TransformPoint(Mat4::scale(2, 3, 4), 1, 1, 1, 1);
+    EXPECT_FLOAT_EQ(p[0], 2.0f);
+    EXPECT_FLOAT_EQ(p[1], 3.0f);
+    EXPECT_FLOAT_EQ(p[2], 4.0f);
+    EXPECT_FLOAT_EQ(p[3], 1.0f);
+}
+
+TEST(Mat4, ScaleOneIsIdentity) {
+    EXPECT_TRUE(MatricesNear(Mat4::scale(1, 1, 1), Mat4::identity()));
+}
+
 TEST(Mat4, MultiplyWithNonTrivialMatricesMatchesHandComputed) {
     // All previous multiply tests use translate matrices whose upper-left
     // 3x3 is identity — which means a transposed-index bug in the inner

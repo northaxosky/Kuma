@@ -114,6 +114,17 @@ struct Mat4 {
         return m;
     }
 
+    // Non-uniform scale: stretches an object by (sx, sy, sz) along
+    // each axis. A scale factor of 1 leaves that axis unchanged;
+    // negative values mirror.
+    static Mat4 scale(float sx, float sy, float sz) {
+        Mat4 m = identity();
+        m(0, 0) = sx;
+        m(1, 1) = sy;
+        m(2, 2) = sz;
+        return m;
+    }
+
     // Perspective projection: 3D → 2D with depth.
     //   fov_radians: vertical field of view (e.g., 45 degrees = 0.785 radians)
     //   aspect:      width / height (e.g., 16/9 = 1.778)

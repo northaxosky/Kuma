@@ -39,19 +39,10 @@ const Vec3& Transform::scale() const {
 }
 
 Mat4 Transform::model_matrix() const {
-    // Build TRS by composing three matrices. Mat4 multiply is read
-    // right-to-left, so this applies scale first, then rotate, then
-    // translate - exactly the convention almost every engine uses.
+    // M = T * R * S - read right-to-left: scale, then rotate, then translate.
     Mat4 t = Mat4::translate(position_.x, position_.y, position_.z);
     Mat4 r = rotation_.to_mat4();
-
-    // No Mat4::scale factory yet - the diagonal form is a one-liner
-    // and self-contained, so inline it instead of growing math.h
-    // for a single user.
-    Mat4 s = Mat4::identity();
-    s(0, 0) = scale_.x;
-    s(1, 1) = scale_.y;
-    s(2, 2) = scale_.z;
+    Mat4 s = Mat4::scale(scale_.x, scale_.y, scale_.z);
 
     return t * r * s;
 }
