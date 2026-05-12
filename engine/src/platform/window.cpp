@@ -1,6 +1,7 @@
 #include <kuma/log.h>
 #include <kuma/window.h>
 
+#include "core/debug_internal.h"
 #include "platform/input_internal.h"
 
 #include <SDL3/SDL.h>
@@ -64,6 +65,11 @@ bool Window::poll_events() {
 
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
+        // Tap every event for the debug overlay first so ImGui can
+        // update its mouse/keyboard state. Safe even when the overlay
+        // is hidden - ImGui still tracks input for when it shows up.
+        debug::process_event(event);
+
         // Forward every event to the input system. It picks out the ones
         // it cares about (keyboard, mouse) and ignores the rest.
         input::process_sdl_event(event);

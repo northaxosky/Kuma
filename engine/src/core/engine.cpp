@@ -122,6 +122,10 @@ bool begin_frame() {
     // duration of the previous frame (0 on the first frame).
     time::tick();
 
+    // Open the ImGui frame so user UPDATE code can call
+    // ImGui::Begin/Text/End. Internally checks the F3 hotkey.
+    debug::new_frame();
+
     // Open the renderer's command-buffer recording window. From here
     // until end_frame, the user's UPDATE code can call
     // renderer.draw() to record per-object draw calls. If this fails

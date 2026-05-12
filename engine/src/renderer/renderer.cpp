@@ -250,6 +250,11 @@ void RendererImpl::end_frame() {
 
     VkCommandBuffer cmd = command_buffers_[current_frame_];
 
+    // Debug overlay rendering must happen INSIDE the active render
+    // pass, AFTER game draws but BEFORE we close the pass. ImGui
+    // emits its own vkCmdDraw calls into our command buffer.
+    debug::render(cmd);
+
     vkCmdEndRenderPass(cmd);
     vkEndCommandBuffer(cmd);
 

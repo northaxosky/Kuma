@@ -1,6 +1,8 @@
 #include "core/debug_internal.h"
 
+#include <kuma/input.h>
 #include <kuma/log.h>
+#include <kuma/time.h>
 
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
@@ -9,6 +11,7 @@
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.h>
 
+#include <algorithm>
 #include <array>
 #include <filesystem>
 #include <string>
@@ -232,12 +235,71 @@ const float* frame_time_history(std::size_t* out_count) {
     return nullptr;
 }
 
-// ── Frame integration stubs (filled in commit 3) ───────────────
+// ── Frame integration ──────────────────────────────────────────
 
-void process_event(const SDL_Event& /*event*/) {}
-void new_frame() {}
-void render(VkCommandBuffer /*cmd*/) {}
-void draw_default_panel() {}
-void show_imgui_demo() {}
+void process_event(const SDL_Event& event) {
+    if (!g.initialized) return;
+    ImGui_ImplSDL3_ProcessEvent(&event);
+}
+
+void new_frame() {
+    if (!g.initialized) return;
+
+    // F3 (or whatever toggle key is configured) flips visibility.
+    // Done AFTER input::begin_frame has snapshotted edges, BEFORE
+    // user UPDATE so the F3-press-this-frame fires immediately.
+    if (g.toggle_key != Key::Count && input::was_key_pressed(g.toggle_key)) {
+        g.visible = !g.visible;
+    }
+
+    ImGui_ImplVulkan_NewFrame();
+    ImGui_ImplSDL3_NewFrame();
+    ImGui::NewFrame();
+}
+
+void render(VkCommandBuffer cmd) {
+    if (!g.initialized) return;
+
+    // ImGui::Render() finalizes the draw list whether or not anything
+    // was actually drawn this frame - safe to call unconditionally.
+    // RenderDrawData with a no-op draw list is also safe.
+    ImGui::Render();
+    ImDrawData* draw_data = ImGui::GetDrawData();
+    if (draw_data) {
+        ImGui_ImplVulkan_RenderDrawData(draw_data, cmd);
+    }
+}
+
+// ── Default panel ──────────────────────────────────────────────
+
+void draw_default_panel() {
+    if (!g.initialized || !g.visible) return;
+
+    // Top-right corner, fixed initial position; user can drag it.
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x - 16.0f, vp->WorkPos.y + 16.0f),
+                            ImGuiCond_FirstUseEver, ImVec2(1.0f, 0.0f));
+    ImGui::SetNextWindowSize(ImVec2(280.0f, 0.0f), ImGuiCond_FirstUseEver);
+
+    if (ImGui::Begin("Kuma Debug", nullptr, ImGuiWindowFlags_NoCollapse)) {
+        ImGui::Text("FPS:        %.1f", fps());
+        ImGui::Text("Frame:      %.2f ms", frame_time_ms());
+        ImGui::Text("1%% low:     %.2f ms", one_percent_low_ms());
+
+        std::size_t count = 0;
+        const float* history = frame_time_history(&count);
+        if (history && count > 1) {
+            ImGui::PlotLines("##frametime", history, static_cast<int>(count), 0, nullptr,
+                             0.0f, FLT_MAX, ImVec2(0, 60));
+        }
+    }
+    ImGui::End();
+}
+
+void show_imgui_demo() {
+    if (!g.initialized || !g.visible) return;
+    bool open = true;
+    ImGui::ShowDemoWindow(&open);
+}
 
 }  // namespace kuma::debug
