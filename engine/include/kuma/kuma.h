@@ -33,24 +33,18 @@ bool init(const EngineConfig& config);
 // Shut down the engine. Call once before exit.
 void shutdown();
 
-// ── Frame orchestration ────────────────────────────────────────────
-// The canonical Kuma frame is split into 5 phases. Each module
-// declares the phase it implements; modules may only depend on data
-// produced by *earlier* phases. This file is the single source of
-// truth for frame ordering.
+// ── Frame loop ─────────────────────────────────────────────────────
+// Game-owned main loop:
 //
-//   Phase 1  INPUT    drain OS events, snapshot input state
-//   Phase 2  TIME     tick the clock, compute delta_time      (TBD)
-//   Phase 3  UPDATE   game logic — runs in the caller's loop body
-//   Phase 4  RENDER   record draw commands
-//   Phase 5  PRESENT  submit + swap
-//
-// Game-owned loop pattern (Tier 1 orchestration):
-//
-//     while (kuma::begin_frame()) {  // phases 1-2
-//         // phase 3: your game update goes here
-//         kuma::end_frame();         // phases 4-5
+//     while (kuma::begin_frame()) {
+//         // your game update goes here
+//         kuma::end_frame();
 //     }
+//
+// begin_frame drains OS input, ticks the clock, and prepares the
+// renderer for recording. Your update code calls renderer.draw()
+// once per object and any other engine APIs. end_frame submits the
+// recorded commands and presents.
 //
 // Returns false when the user requests quit (window close, etc.).
 bool begin_frame();

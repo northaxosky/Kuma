@@ -3,8 +3,7 @@
 // ── Kuma Transform ──────────────────────────────────────────────
 // A 3D transform: position, rotation, and scale. Produces a model
 // matrix on demand (M = T * R * S - scale first, then rotate, then
-// translate). Pure value type with no engine dependencies; the
-// renderer consumes its model_matrix() during Phase 4.
+// translate). Pure value type with no engine dependencies.
 
 #include <kuma/math.h>
 

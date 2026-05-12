@@ -34,18 +34,18 @@ struct InitContext {
 bool init(const InitContext& ctx);
 void shutdown();
 
-// Phase 1 (INPUT) hook: forwards each SDL event into ImGui so its
-// internal mouse/keyboard state stays in sync with the OS.
+// Forwards each SDL event into ImGui so its internal mouse/keyboard
+// state stays in sync with the OS.
 void process_event(const SDL_Event& event);
 
-// Called once per frame between Phase 2 (TIME) and Phase 3 (UPDATE).
-// Updates internal stats (FPS smoothing, frame-time ring buffer)
-// from kuma::time::delta(), checks the F3 hotkey, then opens the
-// ImGui frame so user code can call ImGui::Begin/Text/End during
-// UPDATE.
+// Called once per frame from engine::begin_frame, after time::tick
+// and before user update code. Updates internal stats (FPS smoothing,
+// frame-time ring buffer) from kuma::time::delta(), checks the F3
+// hotkey, then opens the ImGui frame so user code can call
+// ImGui::Begin/Text/End during the update.
 void new_frame();
 
-// Called by RendererImpl::end_frame INSIDE the active render pass,
+// Called from RendererImpl::end_frame INSIDE the active render pass,
 // after game draws but before vkCmdEndRenderPass. Calls
 // ImGui::Render() and ImGui_ImplVulkan_RenderDrawData(cmd, ...).
 // No-op if init() failed or hasn't run.

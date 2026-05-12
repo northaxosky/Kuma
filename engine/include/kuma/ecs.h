@@ -1,8 +1,8 @@
 #pragma once
 
 // ── Kuma ECS ────────────────────────────────────────────────────
-// Entity-Component-System registry. Sparse-set storage internally
-// (see ADR 0006). Public API contract is storage-agnostic so the
+// Entity-Component-System registry. Sparse-set storage internally,
+// with a public API designed to be storage-agnostic so the
 // implementation can evolve without breaking callers.
 //
 // Discipline rules:
@@ -12,8 +12,6 @@
 //   - Mutating the registry (add/remove/destroy) DURING iteration
 //     of a view() is undefined behavior. Defer to end-of-frame in
 //     user code.
-//
-// Frame phase: typically Phase 3 UPDATE (game logic).
 
 #include <cassert>
 #include <cstdint>
@@ -252,7 +250,7 @@ public:
     //   }
     //
     // Mutating the registry while a view iteration is live is
-    // undefined behavior. See ADR 0006.
+    // undefined behavior.
     template <typename... Components>
     View<Components...> view();
 

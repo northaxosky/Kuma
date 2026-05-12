@@ -22,9 +22,8 @@ static Clock s_clock;
 
 namespace time {
 
-// Phase 2 of the frame contract — called from engine::begin_frame
-// after window.poll_events. Not part of the public API; game code
-// must not call this directly.
+// Called from engine::begin_frame after window.poll_events. Not part
+// of the public API; game code must not call this directly.
 void tick() {
     const auto now = std::chrono::steady_clock::now();
     const auto ns  = std::chrono::duration_cast<std::chrono::nanoseconds>(

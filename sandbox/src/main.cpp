@@ -5,15 +5,12 @@
 
 namespace {
 
-// Marker component: "this entity should be drawn this frame."
-// Empty struct - it's pure presence/absence info for the render
-// system's view filter. ECS handles empty components without
-// wasting space.
+// Empty marker component: "this entity should be drawn this frame."
+// ECS handles zero-sized components without wasting space.
 struct RenderTag {};
 
-// SYSTEM (Phase 3 UPDATE): spin every transform around +Y.
-// One free function per system, called from the main loop. No
-// scheduler in v1 - ordering is hardcoded in main().
+// Spin every transform around the +Y axis. Plain free function over
+// a single-component view - this is what an ECS "system" looks like.
 void spin_system(kuma::Registry& registry, float angle_radians) {
     for (auto [e, transform] : registry.view<kuma::Transform>()) {
         (void)e;
@@ -21,9 +18,8 @@ void spin_system(kuma::Registry& registry, float angle_radians) {
     }
 }
 
-// SYSTEM (Phase 4 RENDER): one draw call per renderable entity.
-// Renderer doesn't know about ECS - it just gets fed model
-// matrices and draw() calls in a loop.
+// One draw call per renderable entity. The renderer doesn't know about
+// ECS - this system bridges the two by feeding model matrices in a loop.
 void render_system(kuma::Registry& registry, kuma::Renderer& renderer) {
     for (auto [e, transform, tag] : registry.view<kuma::Transform, RenderTag>()) {
         (void)e;
@@ -80,7 +76,6 @@ int main() {
         kGridSize * kGridSize);
 
     while (kuma::begin_frame()) {
-        // ── Phase 3: UPDATE ─────────────────────────────────────
         if (kuma::input::was_key_pressed(kuma::Key::Escape)) {
             kuma::get_window().set_relative_mouse_mode(false);
             kuma::log::info("Esc pressed - quitting");
@@ -126,7 +121,7 @@ int main() {
             ImGui::End();
         }
 
-        // ── Phase 4 driver: render system feeds the renderer ────
+        // Render every entity tagged for drawing.
         render_system(registry, kuma::get_renderer());
 
         if (kuma::input::was_mouse_button_pressed(kuma::MouseButton::Left)) {

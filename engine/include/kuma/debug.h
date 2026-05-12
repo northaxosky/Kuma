@@ -14,8 +14,8 @@
 //       ImGui::End();
 //   }
 //
-// Custom panels use ImGui directly (#include <imgui.h>). See ADR
-// 0006-style "user owns the UI" decision in this module's notes.
+// Custom panels use ImGui directly (#include <imgui.h>) - the
+// engine deliberately doesn't wrap ImGui's already-clean API.
 
 #include <kuma/input.h>
 
@@ -52,12 +52,12 @@ const float* frame_time_history(std::size_t* out_count);
 
 // ── Default panel ──────────────────────────────────────────────
 // Renders the standard FPS / frame time / 1% low / sparkline panel.
-// Call from Phase 3 UPDATE if you want the default look. User code
-// can also write its own panel using raw ImGui:: calls.
+// Call from your update loop if you want the default look. User
+// code can also write its own panel using raw ImGui:: calls.
 void draw_default_panel();
 
 // Renders ImGui's built-in demo window. Useful as live reference
-// docs while learning ImGui's API. Call from Phase 3 UPDATE.
+// docs while learning ImGui's API.
 void show_imgui_demo();
 
 }  // namespace kuma::debug

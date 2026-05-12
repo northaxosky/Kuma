@@ -57,10 +57,9 @@ void Window::destroy() {
 }
 
 bool Window::poll_events() {
-    // Implements frame Phase 1 (INPUT). See <kuma/kuma.h> phase
-    // contract. Snapshots input state for edge detection BEFORE
-    // draining new events: the events about to flow in belong to
-    // the new frame's `current` snapshot.
+    // Snapshot input state for edge detection BEFORE draining new
+    // events: the events about to flow in belong to the new frame's
+    // `current` snapshot.
     input::begin_frame();
 
     SDL_Event event;

@@ -63,22 +63,18 @@ public:
     void set_texture(const void* texture);
     void set_mesh(const void* mesh);
 
-    // Set the active camera matrix for subsequent frames. Usually called
-    // during Phase 3 UPDATE after camera movement, before end_frame()
-    // records Phase 4 render commands.
+    // Set the active camera matrix for subsequent frames. Call once
+    // per frame after camera movement, before kuma::end_frame().
     void set_view_projection(const Mat4& view_projection);
 
     // Set the model matrix for the next draw. Defaults to identity if
-    // never called, so this is optional unlike set_view_projection.
-    // For now there's a single global model; per-draw model matrices
-    // arrive with the ECS work.
+    // never called. Re-call between draws to render different transforms.
     void set_model_matrix(const Mat4& model);
 
     // Records ONE draw call using the current state (mesh, texture,
     // model matrix). Call between begin_frame() and end_frame(), once
     // per object you want rendered. Safe to call zero times - the
-    // frame still clears and presents. Re-call set_model_matrix()
-    // between draws to render different transforms.
+    // frame still clears and presents.
     void draw();
 
     // Internal — returns opaque GPU context for resource loading.

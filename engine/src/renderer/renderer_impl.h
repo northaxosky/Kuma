@@ -171,7 +171,7 @@ private:
     const Mesh* mesh_ = nullptr;
     const Texture* texture_ = nullptr;
 
-    // Camera matrix supplied by game/update code before Phase 4 rendering.
+    // Camera matrix supplied by game code via set_view_projection.
     Mat4 view_projection_ = Mat4::identity();
     bool has_view_projection_ = false;
 

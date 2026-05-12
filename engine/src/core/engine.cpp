@@ -106,39 +106,38 @@ void shutdown() {
     kuma::log::info("Engine shut down");
 }
 
-// ── Frame orchestration ─────────────────────────────────────────
-// This is the *only* place frame phase ordering is hardcoded —
-// modules must not call each other's frame hooks directly.
+// ── Frame loop ──────────────────────────────────────────────────
+// engine.cpp is the single place that orchestrates per-frame
+// subsystem calls. Modules must not call each other's frame hooks
+// directly.
 
 bool begin_frame() {
-    // Phase 1: INPUT — Window::poll_events drains SDL events and
-    // snapshots input state. Returns false on quit request.
+    // Drain OS events and snapshot the input state for this frame.
+    // Returns false on quit request.
     if (!s_window.poll_events()) {
         return false;
     }
 
-    // Phase 2: TIME — sample steady_clock and update the global
-    // Clock. After this returns, kuma::time::delta() is the
+    // Sample steady_clock so kuma::time::delta() reflects the
     // duration of the previous frame (0 on the first frame).
     time::tick();
 
-    // Open the ImGui frame so user UPDATE code can call
+    // Open the ImGui frame so user update code can call
     // ImGui::Begin/Text/End. Internally checks the F3 hotkey.
     debug::new_frame();
 
-    // Open the renderer's command-buffer recording window. From here
-    // until end_frame, the user's UPDATE code can call
-    // renderer.draw() to record per-object draw calls. If this fails
-    // (swapchain rebuild, etc.) the recording window stays closed
-    // and draw() / end_frame() will safely no-op.
+    // Open the renderer's command-buffer recording window so user
+    // update code can call renderer.draw() to record per-object
+    // commands. If this fails (swapchain rebuild, etc.) the window
+    // stays closed and draw() / end_frame() will safely no-op.
     s_renderer.begin_frame();
 
     return true;
 }
 
 void end_frame() {
-    // Phase 4 + 5: end the render pass, submit, present. Internally
-    // no-ops if begin_frame failed to open the recording window.
+    // End the render pass, submit, present. Internally no-ops if
+    // begin_frame failed to open the recording window.
     s_renderer.end_frame();
 }
 

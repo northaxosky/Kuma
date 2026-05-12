@@ -4,10 +4,10 @@
 // Frame timing — how long the last frame took, how long the game
 // has been running, what frame number we're on.
 //
-// Phase 2 of the frame contract (see kuma.h). Values become valid
-// after the first call to kuma::begin_frame() and update once per
-// frame thereafter. Game code should not call any of these from
-// init() — the clock has not ticked yet, all queries return 0.
+// Values become valid after the first call to kuma::begin_frame()
+// and update once per frame thereafter. Game code should not call
+// any of these from init() — the clock has not ticked yet, all
+// queries return 0.
 
 #include <cstdint>
 

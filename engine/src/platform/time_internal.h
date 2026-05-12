@@ -19,8 +19,8 @@ namespace kuma {
 // Frame timing state. One instance lives inside the engine; tests
 // construct their own for unit testing without engine lifecycle.
 //
-// Phase 2 of the frame contract (see kuma.h): tick() runs after
-// input is polled, before game UPDATE reads time::delta().
+// tick() runs from engine::begin_frame after input is polled, before
+// game update reads time::delta().
 struct Clock {
     // ── Tunables ────────────────────────────────────────────────
     // Anti-spiral-of-death dt cap. If a frame stalls (debugger
