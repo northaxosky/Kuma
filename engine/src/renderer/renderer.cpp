@@ -62,6 +62,10 @@ void Renderer::set_view_projection(const Mat4& view_projection) {
     impl_->set_view_projection(view_projection);
 }
 
+void Renderer::set_model_matrix(const Mat4& model) {
+    impl_->set_model_matrix(model);
+}
+
 void* Renderer::gpu_context() {
     static GpuContext ctx = impl_->gpu_context();
     return &ctx;
@@ -192,10 +196,8 @@ bool RendererImpl::begin_frame() {
     // Draw commands
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline_);
 
-    Mat4 model = Mat4::identity();
-
     // projection * view * model: model transforms first, then view, then project
-    Mat4 mvp = view_projection_ * model;
+    Mat4 mvp = view_projection_ * model_;
 
     vkCmdPushConstants(cmd, pipeline_layout_, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(Mat4),
                        mvp.ptr());
@@ -297,6 +299,10 @@ void RendererImpl::set_texture(const Texture* texture) {
 void RendererImpl::set_view_projection(const Mat4& view_projection) {
     view_projection_ = view_projection;
     has_view_projection_ = true;
+}
+
+void RendererImpl::set_model_matrix(const Mat4& model) {
+    model_ = model;
 }
 
 }  // namespace kuma

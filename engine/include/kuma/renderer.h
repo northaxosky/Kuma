@@ -68,6 +68,12 @@ public:
     // records Phase 4 render commands.
     void set_view_projection(const Mat4& view_projection);
 
+    // Set the model matrix for the next draw. Defaults to identity if
+    // never called, so this is optional unlike set_view_projection.
+    // For now there's a single global model; per-draw model matrices
+    // arrive with the ECS work.
+    void set_model_matrix(const Mat4& model);
+
     // Internal — returns opaque GPU context for resource loading.
     // Game code should not call this.
     void* gpu_context();

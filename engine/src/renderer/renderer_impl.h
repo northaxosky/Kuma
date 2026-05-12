@@ -91,6 +91,7 @@ public:
     void set_texture(const Texture* texture);
     void set_mesh(const Mesh* mesh);
     void set_view_projection(const Mat4& view_projection);
+    void set_model_matrix(const Mat4& model);
 
 private:
     // ── device.cpp ──────────────────────────────────────────────
@@ -166,6 +167,10 @@ private:
     // Camera matrix supplied by game/update code before Phase 4 rendering.
     Mat4 view_projection_ = Mat4::identity();
     bool has_view_projection_ = false;
+
+    // Model matrix for the next draw. Identity by default, so callers
+    // that don't care about transforms still get sensible behavior.
+    Mat4 model_ = Mat4::identity();
 
     // Descriptors
     VkDescriptorSetLayout descriptor_set_layout_ = VK_NULL_HANDLE;
