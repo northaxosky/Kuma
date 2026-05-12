@@ -1,0 +1,22 @@
+[package]
+name = "kuma-bake"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Kuma engine asset baker - converts source assets to engine binary format"
+license = "MIT"
+publish = false
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tga"] }
+tobj = "4"
+bytemuck = { version = "1", features = ["derive"] }
+thiserror = "1"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+strip = true

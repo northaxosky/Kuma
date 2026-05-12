@@ -20,10 +20,14 @@ add_custom_command(TARGET sandbox POST_BUILD
     COMMENT "Copying shaders to sandbox output directory"
 )
 
-# Copy game assets (textures, models, etc.) next to the executable.
+# Copy source assets next to the executable. Will be replaced
+# in a later commit with bake outputs going to build/assets/ then
+# being copied here. For now, this keeps the engine's existing
+# OBJ/PNG loaders working off the same paths after the
+# assets/ -> assets/source/ reorganization.
 add_custom_command(TARGET sandbox POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
-        ${CMAKE_SOURCE_DIR}/assets
+        ${CMAKE_SOURCE_DIR}/assets/source
         $<TARGET_FILE_DIR:sandbox>/assets
     COMMENT "Copying assets to sandbox output directory"
 )
