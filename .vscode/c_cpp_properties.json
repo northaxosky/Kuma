@@ -23,7 +23,9 @@
                 "${workspaceFolder}/engine/include/**",
                 "${workspaceFolder}/engine/src/**",
                 "${workspaceFolder}/build/_deps/sdl3-src/include/**",
-                "${workspaceFolder}/build/_deps/googletest-src/googletest/include/**"
+                "${workspaceFolder}/build/_deps/googletest-src/googletest/include/**",
+                "${workspaceFolder}/build/_deps/imgui-src",
+                "${workspaceFolder}/build/_deps/imgui-src/backends"
             ],
 
             "defines": [
