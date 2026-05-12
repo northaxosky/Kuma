@@ -60,6 +60,9 @@ int main() {
     // RenderTag (marks it as drawable). The grid offsets lift the
     // quads off the world origin so the camera can see them all.
     kuma::Registry registry;
+    // Grid size: 10 = 100 entities (smooth 60fps). Bump to 30 for ~900,
+    // 100 for ~10k entities to feel the per-entity-draw bottleneck before
+    // we add instanced rendering (see followups).
     constexpr int kGridSize = 10;
     constexpr float kSpacing = 1.5f;
     for (int x = 0; x < kGridSize; x++) {
@@ -67,8 +70,7 @@ int main() {
             kuma::EntityID e = registry.create_entity();
 
             kuma::Transform t;
-            t.set_position({(x - kGridSize / 2) * kSpacing,
-                            (y - kGridSize / 2) * kSpacing, 0.0f});
+            t.set_position({(x - kGridSize / 2) * kSpacing, (y - kGridSize / 2) * kSpacing, 0.0f});
             registry.add<kuma::Transform>(e, t);
             registry.add<RenderTag>(e, RenderTag{});
         }
