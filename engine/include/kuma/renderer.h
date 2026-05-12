@@ -74,6 +74,13 @@ public:
     // arrive with the ECS work.
     void set_model_matrix(const Mat4& model);
 
+    // Records ONE draw call using the current state (mesh, texture,
+    // model matrix). Call between begin_frame() and end_frame(), once
+    // per object you want rendered. Safe to call zero times - the
+    // frame still clears and presents. Re-call set_model_matrix()
+    // between draws to render different transforms.
+    void draw();
+
     // Internal — returns opaque GPU context for resource loading.
     // Game code should not call this.
     void* gpu_context();

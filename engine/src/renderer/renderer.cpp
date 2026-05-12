@@ -66,6 +66,10 @@ void Renderer::set_model_matrix(const Mat4& model) {
     impl_->set_model_matrix(model);
 }
 
+void Renderer::draw() {
+    impl_->draw();
+}
+
 void* Renderer::gpu_context() {
     static GpuContext ctx = impl_->gpu_context();
     return &ctx;
@@ -193,14 +197,11 @@ bool RendererImpl::begin_frame() {
 
     vkCmdBeginRenderPass(cmd, &rp_info, VK_SUBPASS_CONTENTS_INLINE);
 
-    // Draw commands
+    // Per-frame state that doesn't change between draws: pipeline,
+    // viewport, scissor, vertex/index buffers, descriptor sets. The
+    // model matrix and the draw call itself live in draw(), called
+    // once per object the game wants rendered.
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline_);
-
-    // projection * view * model: model transforms first, then view, then project
-    Mat4 mvp = view_projection_ * model_;
-
-    vkCmdPushConstants(cmd, pipeline_layout_, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(Mat4),
-                       mvp.ptr());
 
     VkViewport viewport{};
     viewport.x = 0.0f;
@@ -225,9 +226,19 @@ bool RendererImpl::begin_frame() {
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout_, 0, 1,
                             &descriptor_sets_[current_frame_], 0, nullptr);
 
-    vkCmdDrawIndexed(cmd, mesh_->index_count, 1, 0, 0, 0);
-
     return true;
+}
+
+void RendererImpl::draw() {
+    VkCommandBuffer cmd = command_buffers_[current_frame_];
+
+    // projection * view * model: model transforms first, then view, then project
+    Mat4 mvp = view_projection_ * model_;
+
+    vkCmdPushConstants(cmd, pipeline_layout_, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(Mat4),
+                       mvp.ptr());
+
+    vkCmdDrawIndexed(cmd, mesh_->index_count, 1, 0, 0, 0);
 }
 
 void RendererImpl::end_frame() {

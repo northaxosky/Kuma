@@ -57,6 +57,7 @@ int main() {
         // sin/cos in the rotation math.
         quad_transform.set_rotation_euler(kuma::time::total(), 0.0f, 0.0f);
         kuma::get_renderer().set_model_matrix(quad_transform.model_matrix());
+        kuma::get_renderer().draw();
 
         if (kuma::input::was_mouse_button_pressed(kuma::MouseButton::Left)) {
             const kuma::Vec2 p = kuma::input::mouse_position();

@@ -92,6 +92,7 @@ public:
     void set_mesh(const Mesh* mesh);
     void set_view_projection(const Mat4& view_projection);
     void set_model_matrix(const Mat4& model);
+    void draw();
 
 private:
     // ── device.cpp ──────────────────────────────────────────────
