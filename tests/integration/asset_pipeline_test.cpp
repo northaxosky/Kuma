@@ -36,7 +36,7 @@ fs::path temp_output_path(const std::string& name) {
 
 }  // namespace
 
-TEST(AssetPipelineMesh, BakedTriangleHasValidHeader) {
+TEST(IntegrationAssetPipelineMesh, BakedTriangleHasValidHeader) {
     const fs::path input = fixture("mesh/triangle.obj");
     const fs::path output = temp_output_path("BakedTriangleHasValidHeader");
     fs::remove(output);
@@ -58,7 +58,7 @@ TEST(AssetPipelineMesh, BakedTriangleHasValidHeader) {
     EXPECT_EQ(hdr.vertex_offset, sizeof(KMeshHeader));
 }
 
-TEST(AssetPipelineMesh, BakedTriangleSlicesAreInBounds) {
+TEST(IntegrationAssetPipelineMesh, BakedTriangleSlicesAreInBounds) {
     const fs::path input = fixture("mesh/triangle.obj");
     const fs::path output = temp_output_path("BakedTriangleSlicesAreInBounds");
     fs::remove(output);
@@ -83,7 +83,7 @@ TEST(AssetPipelineMesh, BakedTriangleSlicesAreInBounds) {
         << "trailing bytes detected after index array";
 }
 
-TEST(AssetPipelineMesh, BakeFailsLoudlyOnMissingInput) {
+TEST(IntegrationAssetPipelineMesh, BakeFailsLoudlyOnMissingInput) {
     const fs::path output = temp_output_path("BakeFailsLoudlyOnMissingInput");
     fs::remove(output);
 

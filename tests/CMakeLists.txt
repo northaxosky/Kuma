@@ -64,17 +64,20 @@ target_compile_options(kuma-tests PRIVATE
     $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -Wpedantic>
 )
 
-# Auto-register each TEST() with CTest, tagging integration tests
-# so `ctest -L unit` runs the fast suite and `ctest -L integration`
-# runs the slower cross-module ones.
+# Auto-register each TEST() with CTest. Two passes tag the
+# integration suite separately from unit so users can run
+# `ctest -L unit` (fast) or `ctest -L integration` (slower
+# subprocess-spawning suite). Convention: every integration test
+# must use a fixture name starting with "Integration" - the filter
+# relies on it. See tests/integration/test_helpers.h for details.
 include(GoogleTest)
 gtest_discover_tests(kuma-tests
     DISCOVERY_TIMEOUT 30
-    TEST_FILTER "AssetPipeline*"
+    TEST_FILTER "Integration*"
     PROPERTIES LABELS "integration"
 )
 gtest_discover_tests(kuma-tests
     DISCOVERY_TIMEOUT 30
-    TEST_FILTER "-AssetPipeline*"
+    TEST_FILTER "-Integration*"
     PROPERTIES LABELS "unit"
 )

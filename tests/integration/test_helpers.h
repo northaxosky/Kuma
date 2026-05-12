@@ -5,13 +5,18 @@
 // external tool like kuma-bake). They are headless: no SDL window,
 // no Vulkan device, no audio, no GPU upload.
 //
-// Each test uses the helpers in tests/integration/test_helpers.h
-// to spawn subprocesses (e.g. kuma-bake), capture exit codes, and
-// reach in-tree fixtures via tests/fixtures/<area>/<file>.
+// CONVENTION: every integration test must use a fixture name that
+// starts with "Integration" - e.g. TEST(IntegrationAssetPipeline, ...).
+// CTest filtering relies on this prefix to tag tests with the
+// "integration" label vs. "unit" - new tests that miss the prefix
+// are silently mislabeled. Do not maintain a per-fixture allowlist.
 //
-// Tests are tagged with the "integration" CTest label so they can
-// be run with `ctest -L integration` (and skipped via `ctest -L
-// unit` for fast iteration).
+// Each test uses the helpers below to spawn subprocesses
+// (e.g. kuma-bake), capture exit codes, and reach in-tree fixtures
+// via tests/fixtures/<area>/<file>.
+//
+// Tests with the "integration" label run via `ctest -L integration`
+// (and are skipped by `ctest -L unit` for fast iteration).
 
 #pragma once
 
