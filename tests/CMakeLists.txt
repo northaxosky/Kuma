@@ -28,6 +28,7 @@ add_executable(kuma-tests
     input_test.cpp
     time_test.cpp
     transform_test.cpp
+    integration/asset_pipeline_test.cpp
 )
 
 target_link_libraries(kuma-tests PRIVATE
@@ -41,7 +42,21 @@ target_link_libraries(kuma-tests PRIVATE
 # only the test binary does.
 target_include_directories(kuma-tests PRIVATE
     ${CMAKE_SOURCE_DIR}/engine/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/integration
 )
+
+# Integration tests need the kuma-bake exe and the on-disk fixtures
+# folder. Burning these in at configure time means each test can
+# call kuma::integration::fixture("...") / kuma_bake_exe() without
+# searching at runtime.
+target_compile_definitions(kuma-tests PRIVATE
+    KUMA_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+    KUMA_BAKE_EXE_PATH="${KUMA_BAKE_EXE}"
+)
+
+# Make the test binary depend on the kuma-bake exe so a fresh
+# `cmake --build` always has a usable baker before tests run.
+add_dependencies(kuma-tests kuma-bake-build)
 
 # Same warning level as the engine — tests should be held to the same bar.
 target_compile_options(kuma-tests PRIVATE
@@ -49,6 +64,17 @@ target_compile_options(kuma-tests PRIVATE
     $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -Wpedantic>
 )
 
-# Auto-register each TEST() with CTest so `ctest` picks them up individually.
+# Auto-register each TEST() with CTest, tagging integration tests
+# so `ctest -L unit` runs the fast suite and `ctest -L integration`
+# runs the slower cross-module ones.
 include(GoogleTest)
-gtest_discover_tests(kuma-tests DISCOVERY_TIMEOUT 30)
+gtest_discover_tests(kuma-tests
+    DISCOVERY_TIMEOUT 30
+    TEST_FILTER "AssetPipeline*"
+    PROPERTIES LABELS "integration"
+)
+gtest_discover_tests(kuma-tests
+    DISCOVERY_TIMEOUT 30
+    TEST_FILTER "-AssetPipeline*"
+    PROPERTIES LABELS "unit"
+)

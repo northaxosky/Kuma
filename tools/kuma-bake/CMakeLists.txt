@@ -8,7 +8,8 @@
 # essentially free when nothing has changed.
 
 set(KUMA_BAKE_TARGET_DIR ${CMAKE_BINARY_DIR}/tools/kuma-bake)
-set(KUMA_BAKE_EXE ${KUMA_BAKE_TARGET_DIR}/release/kuma-bake.exe)
+set(KUMA_BAKE_EXE ${KUMA_BAKE_TARGET_DIR}/release/kuma-bake.exe
+    CACHE INTERNAL "Path to the kuma-bake executable")
 
 add_custom_target(kuma-bake-build ALL
     COMMAND ${CARGO_EXECUTABLE} build --release
@@ -33,6 +34,7 @@ function(kuma_bake_mesh INPUT_OBJ)
         DEPENDS ${INPUT_OBJ} kuma-bake-build
         COMMENT "Baking mesh: ${BASE}.obj -> ${BASE}.kmesh"
     )
+    set_property(GLOBAL APPEND PROPERTY KUMA_BAKED_FILES ${OUTPUT})
     set(KUMA_BAKED_${BASE} ${OUTPUT} PARENT_SCOPE)
 endfunction()
 
@@ -45,5 +47,6 @@ function(kuma_bake_texture INPUT_IMG)
         DEPENDS ${INPUT_IMG} kuma-bake-build
         COMMENT "Baking texture: ${BASE} -> ${BASE}.ktex"
     )
+    set_property(GLOBAL APPEND PROPERTY KUMA_BAKED_FILES ${OUTPUT})
     set(KUMA_BAKED_${BASE} ${OUTPUT} PARENT_SCOPE)
 endfunction()

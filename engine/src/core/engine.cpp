@@ -66,10 +66,10 @@ bool init(const EngineConfig& config) {
     }
 
     // Load default resources via the resource manager
-    const auto* mesh =
-        s_resource_manager.load_mesh(platform::exe_relative("assets/models/quad.obj").c_str());
-    const auto* texture = s_resource_manager.load_texture(
-        platform::exe_relative("assets/textures/VaultBoyNV.png").c_str());
+    const auto* mesh = s_resource_manager.load_mesh_binary(
+        platform::exe_relative("assets/models/quad.kmesh").c_str());
+    const auto* texture = s_resource_manager.load_texture_binary(
+        platform::exe_relative("assets/textures/VaultBoyNV.ktex").c_str());
 
     if (!mesh || !texture) {
         kuma::log::error("Failed to load default resources");

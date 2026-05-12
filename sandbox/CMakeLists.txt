@@ -20,14 +20,22 @@ add_custom_command(TARGET sandbox POST_BUILD
     COMMENT "Copying shaders to sandbox output directory"
 )
 
-# Copy source assets next to the executable. Will be replaced
-# in a later commit with bake outputs going to build/assets/ then
-# being copied here. For now, this keeps the engine's existing
-# OBJ/PNG loaders working off the same paths after the
-# assets/ -> assets/source/ reorganization.
+# Bake source assets into the engine binary format. Each helper
+# adds a custom command that runs kuma-bake whenever the source
+# file changes; the outputs land in build/assets/{models,textures}/.
+kuma_bake_mesh(${CMAKE_SOURCE_DIR}/assets/source/models/quad.obj)
+kuma_bake_texture(${CMAKE_SOURCE_DIR}/assets/source/textures/VaultBoyNV.png)
+
+# Roll every baked asset into a single ALL target so they all
+# build as part of cmake --build, then make sandbox depend on it.
+get_property(_baked_files GLOBAL PROPERTY KUMA_BAKED_FILES)
+add_custom_target(kuma-baked-assets ALL DEPENDS ${_baked_files})
+add_dependencies(sandbox kuma-baked-assets)
+
+# Copy the BAKED assets next to the executable.
 add_custom_command(TARGET sandbox POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
-        ${CMAKE_SOURCE_DIR}/assets/source
+        ${CMAKE_BINARY_DIR}/assets
         $<TARGET_FILE_DIR:sandbox>/assets
-    COMMENT "Copying assets to sandbox output directory"
+    COMMENT "Copying baked assets to sandbox output directory"
 )
