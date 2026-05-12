@@ -17,6 +17,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -150,6 +151,12 @@ public:
 
     size_t size() const { return dense_.size(); }
 
+    // Exposed for View<T...> iteration. Parallel to dense_:
+    // entity_slots()[i] is the entity slot whose component lives at
+    // dense_[i]. Order is unspecified and not stable across mutations
+    // (sparse-set's swap-with-last on remove reorders).
+    const std::vector<uint32_t>& entity_slots() const { return entity_slots_; }
+
 private:
     std::vector<uint32_t> sparse_;
     std::vector<T> dense_;
@@ -157,6 +164,11 @@ private:
 };
 
 }  // namespace detail
+
+// Forward declaration - the iterator template comes after Registry so
+// it can refer to the fully-defined Registry / pool helpers.
+template <typename First, typename... Rest>
+class View;
 
 // Forward declaration - the actual storage lives in ecs_internal.h.
 class RegistryImpl;
@@ -230,7 +242,32 @@ public:
         return pool ? pool->try_get(e.id) : nullptr;
     }
 
+    // ── Queries ────────────────────────────────────────────────
+    // Returns a View that iterates all entities possessing every
+    // requested component type. Yields std::tuple<EntityID, T&...>
+    // per match - usable directly with structured bindings:
+    //
+    //   for (auto [e, pos, vel] : registry.view<Position, Velocity>()) {
+    //       pos.x += vel.dx;
+    //   }
+    //
+    // Mutating the registry while a view iteration is live is
+    // undefined behavior. See ADR 0006.
+    template <typename... Components>
+    View<Components...> view();
+
+    // Returns the current generation for a slot, or 0 if the slot
+    // was never allocated. Intended for view internals - game code
+    // should reach for is_valid() / try_get() instead.
+    uint32_t generation_for_slot(uint32_t slot) const;
+
 private:
+    // View<T...> needs typed access to component pools and the
+    // generation-for-slot helper. Friending the variadic template
+    // is cleaner than promoting view_get_pool<T> into the public API.
+    template <typename First, typename... Rest>
+    friend class View;
+
     // Pool factory passed through type-erased boundary so the impl
     // doesn't need to template on T.
     using PoolFactory = detail::IComponentPool* (*)();
@@ -255,5 +292,132 @@ private:
 
     RegistryImpl* impl_;
 };
+
+// ── View<T...> ──────────────────────────────────────────────────
+// Iterates entities that have ALL of `First, Rest...`. Built from
+// Registry::view<T...>(). The "primary" pool (First) is iterated
+// densely; for each candidate, the other pools are checked via
+// sparse-set has() before the entity is yielded.
+//
+// Picking the smallest pool as primary would be a classic
+// optimization (currently uses the first template arg). Tracked
+// for later.
+
+template <typename First, typename... Rest>
+class View {
+public:
+    explicit View(Registry* registry)
+        : registry_(registry),
+          primary_(registry->template get_pool<First>()),
+          rest_pools_{registry->template get_pool<Rest>()...} {}
+
+    class Iterator {
+    public:
+        Iterator(const View* view, size_t index) : view_(view), index_(index) {
+            advance_to_match();
+        }
+
+        bool operator==(const Iterator& other) const { return index_ == other.index_; }
+        bool operator!=(const Iterator& other) const { return index_ != other.index_; }
+
+        Iterator& operator++() {
+            ++index_;
+            advance_to_match();
+            return *this;
+        }
+
+        std::tuple<EntityID, First&, Rest&...> operator*() const {
+            const uint32_t slot = view_->primary_->entity_slots()[index_];
+            const EntityID e{slot, view_->registry_->generation_for_slot(slot)};
+            return build_tuple(e, slot, std::index_sequence_for<Rest...>{});
+        }
+
+    private:
+        // Walk forward from the current index until either the slot
+        // matches every required pool, or we run off the end.
+        void advance_to_match() {
+            if (!view_->is_iterable()) {
+                index_ = 0;
+                return;
+            }
+            const size_t n = view_->primary_->size();
+            while (index_ < n) {
+                const uint32_t slot = view_->primary_->entity_slots()[index_];
+                if (view_->slot_matches_rest(slot)) return;
+                ++index_;
+            }
+        }
+
+        template <std::size_t... Is>
+        std::tuple<EntityID, First&, Rest&...> build_tuple(EntityID e, uint32_t slot,
+                                                           std::index_sequence<Is...>) const {
+            return std::tuple<EntityID, First&, Rest&...>(
+                e,
+                view_->primary_->get(slot),
+                std::get<Is>(view_->rest_pools_)->get(slot)...);
+        }
+
+        const View* view_;
+        size_t index_;
+    };
+
+    Iterator begin() const { return Iterator(this, 0); }
+
+    Iterator end() const {
+        return Iterator(this, is_iterable() ? primary_->size() : 0);
+    }
+
+    // O(N) where N is primary pool size; multi-component views walk
+    // and check each entry. Single-component views short-circuit.
+    size_t size() const {
+        if (!is_iterable()) return 0;
+        if constexpr (sizeof...(Rest) == 0) {
+            return primary_->size();
+        } else {
+            size_t count = 0;
+            const size_t n = primary_->size();
+            for (size_t i = 0; i < n; ++i) {
+                if (slot_matches_rest(primary_->entity_slots()[i])) ++count;
+            }
+            return count;
+        }
+    }
+
+    bool empty() const { return size() == 0; }
+
+private:
+    // True iff every required pool exists. If a requested component
+    // type was never add()ed to any entity its pool is null and the
+    // view yields nothing.
+    bool is_iterable() const {
+        if (!primary_) return false;
+        if constexpr (sizeof...(Rest) == 0) {
+            return true;
+        } else {
+            return std::apply(
+                [](auto*... pools) { return (... && (pools != nullptr)); }, rest_pools_);
+        }
+    }
+
+    bool slot_matches_rest(uint32_t slot) const {
+        if constexpr (sizeof...(Rest) == 0) {
+            (void)slot;
+            return true;
+        } else {
+            return std::apply(
+                [slot](auto*... pools) { return (... && pools->has(slot)); }, rest_pools_);
+        }
+    }
+
+    Registry* registry_;
+    detail::ComponentPool<First>* primary_;
+    std::tuple<detail::ComponentPool<Rest>*...> rest_pools_;
+};
+
+template <typename... Components>
+View<Components...> Registry::view() {
+    static_assert(sizeof...(Components) > 0, "Registry::view requires at least one component type");
+    return View<Components...>(this);
+}
 
 }  // namespace kuma

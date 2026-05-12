@@ -313,3 +313,185 @@ TEST(RegistryComponents, AddToInvalidEntityIsNoOp) {
     r.add<Position>(EntityID{999, 1}, Position{1, 2, 3});
     EXPECT_FALSE(r.has<Position>(kInvalidEntity));
 }
+
+// ── Views: single component ─────────────────────────────────────
+
+TEST(RegistryView, SingleComponentVisitsAllMatching) {
+    Registry r;
+    EntityID a = r.create_entity();
+    EntityID b = r.create_entity();
+    EntityID c = r.create_entity();
+    r.add<Position>(a, Position{1, 0, 0});
+    r.add<Position>(b, Position{2, 0, 0});
+    r.add<Position>(c, Position{3, 0, 0});
+
+    std::unordered_set<float> seen;
+    for (auto [e, pos] : r.view<Position>()) {
+        seen.insert(pos.x);
+        EXPECT_TRUE(r.is_valid(e));
+    }
+    EXPECT_EQ(seen.size(), 3u);
+    EXPECT_TRUE(seen.count(1.0f));
+    EXPECT_TRUE(seen.count(2.0f));
+    EXPECT_TRUE(seen.count(3.0f));
+}
+
+TEST(RegistryView, SingleComponentSizeMatchesIteration) {
+    Registry r;
+    for (int i = 0; i < 5; i++) {
+        EntityID e = r.create_entity();
+        r.add<Position>(e, Position{});
+    }
+    EXPECT_EQ(r.view<Position>().size(), 5u);
+    size_t count = 0;
+    for ([[maybe_unused]] auto entry : r.view<Position>()) ++count;
+    EXPECT_EQ(count, 5u);
+}
+
+// ── Views: multi-component intersection ─────────────────────────
+
+TEST(RegistryView, MultiComponentVisitsOnlyEntitiesWithAll) {
+    Registry r;
+    EntityID both = r.create_entity();
+    EntityID pos_only = r.create_entity();
+    EntityID vel_only = r.create_entity();
+    EntityID neither = r.create_entity();
+    (void)neither;  // exists but has no relevant components
+
+    r.add<Position>(both, Position{99, 0, 0});
+    r.add<Velocity>(both, Velocity{1, 0, 0});
+    r.add<Position>(pos_only, Position{0, 0, 0});
+    r.add<Velocity>(vel_only, Velocity{0, 0, 0});
+
+    size_t count = 0;
+    for (auto [e, pos, vel] : r.view<Position, Velocity>()) {
+        ++count;
+        EXPECT_EQ(e, both);
+        EXPECT_FLOAT_EQ(pos.x, 99.0f);
+        EXPECT_FLOAT_EQ(vel.dx, 1.0f);
+    }
+    EXPECT_EQ(count, 1u);
+    EXPECT_EQ((r.view<Position, Velocity>().size()), 1u);
+}
+
+TEST(RegistryView, MultiComponentEmptyIntersectionIteratesZeroTimes) {
+    Registry r;
+    EntityID a = r.create_entity();
+    EntityID b = r.create_entity();
+    r.add<Position>(a, Position{});  // a has only Position
+    r.add<Velocity>(b, Velocity{});  // b has only Velocity
+
+    size_t count = 0;
+    for ([[maybe_unused]] auto entry : r.view<Position, Velocity>()) ++count;
+    EXPECT_EQ(count, 0u);
+    EXPECT_TRUE((r.view<Position, Velocity>().empty()));
+}
+
+// ── Views: edge cases ───────────────────────────────────────────
+
+TEST(RegistryView, ViewWithUnusedComponentTypeIsEmpty) {
+    // No entity has ever had a Tag - the pool was never created.
+    // The view must yield zero results, not crash.
+    Registry r;
+    EntityID e = r.create_entity();
+    r.add<Position>(e, Position{});
+
+    EXPECT_TRUE(r.view<Tag>().empty());
+    EXPECT_EQ(r.view<Tag>().size(), 0u);
+
+    size_t count = 0;
+    for ([[maybe_unused]] auto entry : r.view<Position, Tag>()) ++count;
+    EXPECT_EQ(count, 0u);
+}
+
+TEST(RegistryView, EmptyRegistryHasEmptyView) {
+    Registry r;
+    EXPECT_TRUE(r.view<Position>().empty());
+    EXPECT_EQ(r.view<Position>().size(), 0u);
+
+    size_t count = 0;
+    for ([[maybe_unused]] auto entry : r.view<Position>()) ++count;
+    EXPECT_EQ(count, 0u);
+}
+
+TEST(RegistryView, MutationThroughViewPersists) {
+    // Critical: the references yielded by the view must point at
+    // real storage, not copies. Mutating through them must persist.
+    Registry r;
+    EntityID a = r.create_entity();
+    EntityID b = r.create_entity();
+    r.add<Position>(a, Position{1, 0, 0});
+    r.add<Position>(b, Position{2, 0, 0});
+
+    for (auto [e, pos] : r.view<Position>()) {
+        pos.x += 100.0f;
+    }
+
+    EXPECT_FLOAT_EQ(r.get<Position>(a).x, 101.0f);
+    EXPECT_FLOAT_EQ(r.get<Position>(b).x, 102.0f);
+}
+
+TEST(RegistryView, YieldedEntityIDIsCurrentlyValid) {
+    // The EntityID the view yields must include the current
+    // generation, so callers can store it / compare it / pass it
+    // back to other Registry methods.
+    Registry r;
+    EntityID e = r.create_entity();
+    r.add<Position>(e, Position{});
+
+    bool checked = false;
+    for (auto [yielded, pos] : r.view<Position>()) {
+        EXPECT_EQ(yielded, e);
+        EXPECT_TRUE(r.is_valid(yielded));
+        EXPECT_FLOAT_EQ(r.get<Position>(yielded).x, pos.x);
+        checked = true;
+    }
+    EXPECT_TRUE(checked);
+}
+
+TEST(RegistryView, ViewSurvivesSlotReuse) {
+    // Spawn-destroy-spawn pattern. The view should iterate the
+    // current set of Position-having entities, including the
+    // reused slot (with its new generation).
+    Registry r;
+    EntityID old = r.create_entity();
+    r.add<Position>(old, Position{50, 0, 0});
+    r.destroy_entity(old);  // strips Position too
+
+    EntityID fresh = r.create_entity();  // reuses slot
+    r.add<Position>(fresh, Position{99, 0, 0});
+
+    size_t count = 0;
+    for (auto [e, pos] : r.view<Position>()) {
+        ++count;
+        EXPECT_EQ(e, fresh);  // generation matches the new entity
+        EXPECT_NE(e, old);    // old handle not valid anymore
+        EXPECT_FLOAT_EQ(pos.x, 99.0f);
+    }
+    EXPECT_EQ(count, 1u);
+}
+
+TEST(RegistryView, ThreeComponentIntersection) {
+    // Verifies the variadic expansion handles 3+ components correctly.
+    Registry r;
+    EntityID all = r.create_entity();
+    EntityID two = r.create_entity();
+
+    r.add<Position>(all, Position{1, 0, 0});
+    r.add<Velocity>(all, Velocity{2, 0, 0});
+    r.add<Tag>(all, Tag{});
+
+    r.add<Position>(two, Position{0, 0, 0});
+    r.add<Velocity>(two, Velocity{0, 0, 0});
+    // intentionally no Tag on `two`
+
+    size_t count = 0;
+    for (auto [e, pos, vel, tag] : r.view<Position, Velocity, Tag>()) {
+        ++count;
+        EXPECT_EQ(e, all);
+        EXPECT_FLOAT_EQ(pos.x, 1.0f);
+        EXPECT_FLOAT_EQ(vel.dx, 2.0f);
+        (void)tag;
+    }
+    EXPECT_EQ(count, 1u);
+}

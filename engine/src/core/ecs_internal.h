@@ -21,6 +21,7 @@ public:
     EntityID create_entity();
     void destroy_entity(EntityID e);
     bool is_valid(EntityID e) const;
+    uint32_t generation_for_slot(uint32_t slot) const;
 
     // Pool access - called by Registry's templated methods through
     // the public Registry::get_pool / get_or_create_pool helpers.

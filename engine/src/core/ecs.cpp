@@ -40,6 +40,10 @@ detail::IComponentPool* Registry::get_or_create_pool_raw(detail::ComponentTypeID
 
 // ── RegistryImpl ────────────────────────────────────────────────
 
+uint32_t Registry::generation_for_slot(uint32_t slot) const {
+    return impl_->generation_for_slot(slot);
+}
+
 EntityID RegistryImpl::create_entity() {
     // Reserve slot 0 on first use so kInvalidEntity{0,0} stays
     // permanently invalid no matter how many entities we churn.
@@ -82,6 +86,11 @@ bool RegistryImpl::is_valid(EntityID e) const {
     if (e.id == 0) return false;                    // reserved slot
     if (e.id >= generations_.size()) return false;  // never allocated
     return generations_[e.id] == e.generation;
+}
+
+uint32_t RegistryImpl::generation_for_slot(uint32_t slot) const {
+    if (slot >= generations_.size()) return 0;
+    return generations_[slot];
 }
 
 detail::IComponentPool* RegistryImpl::get_pool(detail::ComponentTypeID id) const {
