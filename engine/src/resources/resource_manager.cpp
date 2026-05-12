@@ -2,12 +2,14 @@
 // Loads, caches, and manages GPU resources (textures, meshes).
 // Owns a GPU context (device, queue, etc.) to upload data to the GPU.
 
+#include <kuma/asset_format.h>
 #include <kuma/log.h>
 #include <kuma/resource_manager.h>
 
 #include <array>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -60,6 +62,7 @@ public:
 
     const Texture* load_texture(const char* path);
     const Mesh* load_mesh(const char* path);
+    const Mesh* load_mesh_binary(const char* path);
 
     GpuContext gpu_;
 
@@ -72,6 +75,13 @@ private:
     void end_single_command(VkCommandBuffer cmd) const;
     void transition_image_layout(VkImage image, VkImageLayout old_layout, VkImageLayout new_layout);
     void copy_buffer_to_image(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
+
+    // Allocates host-visible+coherent memory and uploads the given
+    // bytes into a buffer of the requested usage. Used by both the
+    // mesh and (eventually) other binary loaders. Caller owns the
+    // returned VkBuffer + VkDeviceMemory and must free them on shutdown.
+    bool upload_buffer(const void* data, VkDeviceSize size, VkBufferUsageFlags usage,
+                       VkBuffer& out_buffer, VkDeviceMemory& out_memory);
 };
 
 // ── Public wrapper ──────────────────────────────────────────────
@@ -102,6 +112,10 @@ const Texture* ResourceManager::load_texture(const char* path) {
 
 const Mesh* ResourceManager::load_mesh(const char* path) {
     return impl_->load_mesh(path);
+}
+
+const Mesh* ResourceManager::load_mesh_binary(const char* path) {
+    return impl_->load_mesh_binary(path);
 }
 
 // ── GPU Helpers ─────────────────────────────────────────────────
@@ -402,16 +416,23 @@ const Mesh* ResourceManager::Impl::load_mesh(const char* path) {
         for (const auto& index : shape.mesh.indices) {
             Vertex vertex{};
 
-            // Position: attrib.vertices stores [x0, y0, z0, x1, y1, z1, ...]
-            // We take x and y, skip z (we're 2D for now)
-            vertex.position[0] = attrib.vertices[3 * index.vertex_index + 0];
-            vertex.position[1] = attrib.vertices[3 * index.vertex_index + 1];
+            vertex.pos[0] = attrib.vertices[3 * index.vertex_index + 0];
+            vertex.pos[1] = attrib.vertices[3 * index.vertex_index + 1];
+            vertex.pos[2] = attrib.vertices[3 * index.vertex_index + 2];
 
-            // UV: attrib.texcoords stores [u0, v0, u1, v1, ...]
             if (index.texcoord_index >= 0) {
                 vertex.uv[0] = attrib.texcoords[2 * index.texcoord_index + 0];
-                // OBJ has V=0 at bottom, Vulkan has V=0 at top — flip it
+                // OBJ has V=0 at bottom, Vulkan has V=0 at top - flip it.
                 vertex.uv[1] = 1.0f - attrib.texcoords[2 * index.texcoord_index + 1];
+            }
+
+            // Normal: fill in if present, otherwise default to +Y.
+            if (index.normal_index >= 0) {
+                vertex.normal[0] = attrib.normals[3 * index.normal_index + 0];
+                vertex.normal[1] = attrib.normals[3 * index.normal_index + 1];
+                vertex.normal[2] = attrib.normals[3 * index.normal_index + 2];
+            } else {
+                vertex.normal[1] = 1.0f;
             }
 
             indices.push_back(static_cast<uint16_t>(vertices.size()));
@@ -419,65 +440,122 @@ const Mesh* ResourceManager::Impl::load_mesh(const char* path) {
         }
     }
 
-    // Upload vertex data to GPU
+    // Upload vertex + index data to GPU.
     Mesh mesh{};
     mesh.index_count = static_cast<uint32_t>(indices.size());
 
-    VkDeviceSize vertex_size = sizeof(Vertex) * vertices.size();
-    VkDeviceSize index_size = sizeof(uint16_t) * indices.size();
-
-    // ── Vertex buffer ───────────────────────────────────────────
-    VkBufferCreateInfo vb_info{};
-    vb_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    vb_info.size = vertex_size;
-    vb_info.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-    vb_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    vkCreateBuffer(gpu_.device, &vb_info, nullptr, &mesh.vertex_buffer);
-
-    VkMemoryRequirements mem_reqs;
-    vkGetBufferMemoryRequirements(gpu_.device, mesh.vertex_buffer, &mem_reqs);
-
-    VkMemoryAllocateInfo alloc_info{};
-    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    alloc_info.allocationSize = mem_reqs.size;
-    alloc_info.memoryTypeIndex =
-        find_memory_type(mem_reqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                                      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-    vkAllocateMemory(gpu_.device, &alloc_info, nullptr, &mesh.vertex_memory);
-    vkBindBufferMemory(gpu_.device, mesh.vertex_buffer, mesh.vertex_memory, 0);
-
-    void* data;
-    vkMapMemory(gpu_.device, mesh.vertex_memory, 0, vertex_size, 0, &data);
-    std::memcpy(data, vertices.data(), vertex_size);
-    vkUnmapMemory(gpu_.device, mesh.vertex_memory);
-
-    // ── Index buffer ────────────────────────────────────────────
-    VkBufferCreateInfo ib_info{};
-    ib_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    ib_info.size = index_size;
-    ib_info.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-    ib_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    vkCreateBuffer(gpu_.device, &ib_info, nullptr, &mesh.index_buffer);
-
-    vkGetBufferMemoryRequirements(gpu_.device, mesh.index_buffer, &mem_reqs);
-
-    alloc_info.allocationSize = mem_reqs.size;
-    alloc_info.memoryTypeIndex =
-        find_memory_type(mem_reqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                                      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-    vkAllocateMemory(gpu_.device, &alloc_info, nullptr, &mesh.index_memory);
-    vkBindBufferMemory(gpu_.device, mesh.index_buffer, mesh.index_memory, 0);
-
-    vkMapMemory(gpu_.device, mesh.index_memory, 0, index_size, 0, &data);
-    std::memcpy(data, indices.data(), index_size);
-    vkUnmapMemory(gpu_.device, mesh.index_memory);
+    if (!upload_buffer(vertices.data(), sizeof(Vertex) * vertices.size(),
+                       VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                       mesh.vertex_buffer, mesh.vertex_memory)) {
+        return nullptr;
+    }
+    if (!upload_buffer(indices.data(), sizeof(uint16_t) * indices.size(),
+                       VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                       mesh.index_buffer, mesh.index_memory)) {
+        return nullptr;
+    }
 
     kuma::log::info("Mesh loaded: %s (%zu vertices, %u indices)", path, vertices.size(),
                     mesh.index_count);
+
+    auto [inserted, _] = mesh_cache_.emplace(path, mesh);
+    return &inserted->second;
+}
+
+// ── Binary mesh loader (.kmesh produced by kuma-bake) ───────────
+
+bool ResourceManager::Impl::upload_buffer(const void* data, VkDeviceSize size,
+                                          VkBufferUsageFlags usage, VkBuffer& out_buffer,
+                                          VkDeviceMemory& out_memory) {
+    VkBufferCreateInfo bi{};
+    bi.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bi.size        = size;
+    bi.usage       = usage;
+    bi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    if (vkCreateBuffer(gpu_.device, &bi, nullptr, &out_buffer) != VK_SUCCESS) {
+        return false;
+    }
+
+    VkMemoryRequirements mem_reqs{};
+    vkGetBufferMemoryRequirements(gpu_.device, out_buffer, &mem_reqs);
+
+    VkMemoryAllocateInfo ai{};
+    ai.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    ai.allocationSize  = mem_reqs.size;
+    ai.memoryTypeIndex = find_memory_type(
+        mem_reqs.memoryTypeBits,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    if (vkAllocateMemory(gpu_.device, &ai, nullptr, &out_memory) != VK_SUCCESS) {
+        vkDestroyBuffer(gpu_.device, out_buffer, nullptr);
+        out_buffer = VK_NULL_HANDLE;
+        return false;
+    }
+    vkBindBufferMemory(gpu_.device, out_buffer, out_memory, 0);
+
+    void* mapped = nullptr;
+    vkMapMemory(gpu_.device, out_memory, 0, size, 0, &mapped);
+    std::memcpy(mapped, data, size);
+    vkUnmapMemory(gpu_.device, out_memory);
+    return true;
+}
+
+const Mesh* ResourceManager::Impl::load_mesh_binary(const char* path) {
+    auto it = mesh_cache_.find(path);
+    if (it != mesh_cache_.end()) {
+        return &it->second;
+    }
+
+    std::ifstream f(path, std::ios::binary | std::ios::ate);
+    if (!f) {
+        kuma::log::error("kmesh open failed: %s", path);
+        return nullptr;
+    }
+    const std::streamsize size = f.tellg();
+    f.seekg(0, std::ios::beg);
+    std::vector<char> bytes(static_cast<size_t>(size));
+    f.read(bytes.data(), size);
+
+    if (bytes.size() < sizeof(asset_format::KMeshHeader)) {
+        kuma::log::error("kmesh too small: %s", path);
+        return nullptr;
+    }
+
+    asset_format::KMeshHeader hdr{};
+    std::memcpy(&hdr, bytes.data(), sizeof(hdr));
+
+    if (hdr.magic != asset_format::kMagicKMesh) {
+        kuma::log::error("kmesh bad magic 0x%08x: %s", hdr.magic, path);
+        return nullptr;
+    }
+    if (hdr.version != asset_format::kKMeshVersion) {
+        kuma::log::error("kmesh version mismatch (file %u, engine %u): %s", hdr.version,
+                         asset_format::kKMeshVersion, path);
+        return nullptr;
+    }
+
+    const VkDeviceSize vertex_bytes = hdr.vertex_count * sizeof(Vertex);
+    const VkDeviceSize index_bytes  = hdr.index_count * sizeof(uint16_t);
+    if (hdr.vertex_offset + vertex_bytes > bytes.size() ||
+        hdr.index_offset + index_bytes > bytes.size()) {
+        kuma::log::error("kmesh truncated: %s", path);
+        return nullptr;
+    }
+
+    Mesh mesh{};
+    mesh.index_count = hdr.index_count;
+    if (!upload_buffer(bytes.data() + hdr.vertex_offset, vertex_bytes,
+                       VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                       mesh.vertex_buffer, mesh.vertex_memory)) {
+        return nullptr;
+    }
+    if (!upload_buffer(bytes.data() + hdr.index_offset, index_bytes,
+                       VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                       mesh.index_buffer, mesh.index_memory)) {
+        return nullptr;
+    }
+
+    kuma::log::info("Mesh loaded: %s (%u vertices, %u indices, binary)", path,
+                    hdr.vertex_count, hdr.index_count);
 
     auto [inserted, _] = mesh_cache_.emplace(path, mesh);
     return &inserted->second;

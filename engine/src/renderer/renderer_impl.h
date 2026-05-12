@@ -25,9 +25,15 @@ namespace kuma {
 //   layout(location = 0) in vec2 in_position  →  position (offset 0)
 //   layout(location = 1) in vec2 in_uv        →  uv       (offset 8)
 
+// ── Vertex ──────────────────────────────────────────────────────
+// Per-vertex layout consumed by the Vulkan pipeline. MUST match
+// kuma::asset_format::Vertex byte for byte; the bake tool writes
+// vertex arrays in this exact layout straight to .kmesh files.
 struct Vertex {
-    float position[2];  // x, y  — clip space coordinates (-1 to +1)
-    float uv[2];        // u, v  — texture coordinates (0 to 1)
+    float pos[3];      // x, y, z (model space)
+    float uv[2];       // u, v texture coordinates (V flipped at bake time)
+    float normal[3];   // unit normal (currently unused by the shader,
+                       //  reserved for lighting work)
 };
 
 // ── Texture ─────────────────────────────────────────────────────

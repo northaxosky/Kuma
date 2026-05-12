@@ -83,17 +83,22 @@ bool RendererImpl::create_graphics_pipeline() {
     binding_desc.stride = sizeof(Vertex);
     binding_desc.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
-    std::array<VkVertexInputAttributeDescription, 2> attr_descs{};
+    std::array<VkVertexInputAttributeDescription, 3> attr_descs{};
 
     attr_descs[0].binding = 0;
     attr_descs[0].location = 0;
-    attr_descs[0].format = VK_FORMAT_R32G32_SFLOAT;
-    attr_descs[0].offset = offsetof(Vertex, position);
+    attr_descs[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+    attr_descs[0].offset = offsetof(Vertex, pos);
 
     attr_descs[1].binding = 0;
     attr_descs[1].location = 1;
     attr_descs[1].format = VK_FORMAT_R32G32_SFLOAT;
     attr_descs[1].offset = offsetof(Vertex, uv);
+
+    attr_descs[2].binding = 0;
+    attr_descs[2].location = 2;
+    attr_descs[2].format = VK_FORMAT_R32G32B32_SFLOAT;
+    attr_descs[2].offset = offsetof(Vertex, normal);
 
     VkPipelineVertexInputStateCreateInfo vertex_input{};
     vertex_input.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;

@@ -30,6 +30,11 @@ public:
     // Returns nullptr on failure. Caches by path.
     const Mesh* load_mesh(const char* path);
 
+    // Load a mesh from a `.kmesh` binary file produced by kuma-bake.
+    // Same caching semantics as load_mesh. Returns nullptr on failure
+    // (file missing, bad magic, version mismatch, truncated payload).
+    const Mesh* load_mesh_binary(const char* path);
+
 private:
     class Impl;
     Impl* impl_ = nullptr;

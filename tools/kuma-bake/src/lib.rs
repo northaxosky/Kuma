@@ -6,5 +6,7 @@
 
 pub mod error;
 pub mod format;
+pub mod mesh;
 
 pub use error::BakeError;
+pub use mesh::bake_mesh;

@@ -3,9 +3,11 @@ build/
 out/
 cmake-build-*/
 *.o
-# MSVC linker object files (not .obj 3D models — those live in assets/)
+# MSVC linker object files (not .obj 3D models — those live in assets/
+# and tests/fixtures/)
 *.obj
 !assets/**/*.obj
+!**/tests/fixtures/**/*.obj
 *.exe
 *.dll
 *.so
