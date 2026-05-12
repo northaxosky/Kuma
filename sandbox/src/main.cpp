@@ -21,6 +21,10 @@ int main() {
     kuma::FreeFlyCameraController camera_controller;
     camera_controller.mouse_sensitivity = 0.0025f;
 
+    // Visible payoff for the Transform module: spin the quad in place
+    // around its Y axis so the model matrix is obviously doing work.
+    kuma::Transform quad_transform;
+
     kuma::log::info(
         "Sandbox ready. Try: Esc to quit, WASD to move camera, Q/E down/up, hold RMB to look.");
 
@@ -46,6 +50,13 @@ int main() {
 
         camera_controller.update(camera);
         kuma::get_renderer().set_view_projection(camera.view_projection());
+
+        // Spin the quad around +Y at one radian per second. time::total()
+        // is monotonically increasing seconds since startup, so this just
+        // keeps growing - the modulo-2pi wrap happens implicitly inside
+        // sin/cos in the rotation math.
+        quad_transform.set_rotation_euler(kuma::time::total(), 0.0f, 0.0f);
+        kuma::get_renderer().set_model_matrix(quad_transform.model_matrix());
 
         if (kuma::input::was_mouse_button_pressed(kuma::MouseButton::Left)) {
             const kuma::Vec2 p = kuma::input::mouse_position();

@@ -18,6 +18,7 @@ Kuma is designed for small, indie games — prioritizing simplicity, modularity,
 - **Math** — Vec3, Mat4, and MVP matrix helpers
 - **MVP pipeline** — perspective camera, push-constant model-view-projection in the quad shader
 - **Camera** — reusable perspective camera plus keyboard/RMB-look free-fly controller in the sandbox
+- **Transform** — position + quaternion rotation + scale, producing a model matrix; sandbox spins the quad to demo
 - **Input** — keyboard & mouse polling with edge detection (pressed/released this frame)
 - **Time** — monotonic delta / total / frame count with anti-spiral clamp
 - **Frame orchestration** — engine-owned `begin_frame()` / `end_frame()` wrapping a 5-phase contract (input → time → update → render → present)
@@ -25,7 +26,6 @@ Kuma is designed for small, indie games — prioritizing simplicity, modularity,
 
 ### What's Next
 
-- Transform abstraction
 - Scene graph / ECS
 - Audio, physics
 
