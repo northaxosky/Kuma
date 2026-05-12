@@ -1,7 +1,6 @@
-// Tests for kuma::Registry entity lifecycle.
+// Tests for kuma::Registry entity lifecycle and component CRUD.
 //
-// Components and views land in subsequent commits. This commit
-// covers EntityID semantics and create/destroy/is_valid.
+// View<T...> queries land in Commit 3.
 
 #include <kuma/ecs.h>
 
@@ -12,6 +11,22 @@
 using kuma::EntityID;
 using kuma::kInvalidEntity;
 using kuma::Registry;
+
+namespace {
+
+// Plain-data component types for tests. POD-like as the discipline
+// rule requires - no virtuals, no expensive destructors.
+struct Position {
+    float x = 0.0f, y = 0.0f, z = 0.0f;
+};
+
+struct Velocity {
+    float dx = 0.0f, dy = 0.0f, dz = 0.0f;
+};
+
+struct Tag {};  // empty marker component
+
+}  // namespace
 
 // ── EntityID ────────────────────────────────────────────────────
 
@@ -140,4 +155,161 @@ TEST(Registry, ChurnDoesNotCorruptHandles) {
     for (EntityID e : destroyed) {
         EXPECT_FALSE(r.is_valid(e));
     }
+}
+
+// ── Components: add / has / get ─────────────────────────────────
+
+TEST(RegistryComponents, AddedComponentIsRetrievableViaGet) {
+    Registry r;
+    EntityID e = r.create_entity();
+    r.add<Position>(e, Position{1.0f, 2.0f, 3.0f});
+
+    EXPECT_TRUE(r.has<Position>(e));
+    EXPECT_FLOAT_EQ(r.get<Position>(e).x, 1.0f);
+    EXPECT_FLOAT_EQ(r.get<Position>(e).y, 2.0f);
+    EXPECT_FLOAT_EQ(r.get<Position>(e).z, 3.0f);
+}
+
+TEST(RegistryComponents, HasReturnsFalseForMissingComponent) {
+    Registry r;
+    EntityID e = r.create_entity();
+    EXPECT_FALSE(r.has<Position>(e));
+    r.add<Position>(e, Position{});
+    EXPECT_FALSE(r.has<Velocity>(e));  // different type, also missing
+}
+
+TEST(RegistryComponents, GetMutationPersistsAcrossCalls) {
+    Registry r;
+    EntityID e = r.create_entity();
+    r.add<Position>(e, Position{0, 0, 0});
+
+    r.get<Position>(e).x = 42.0f;
+    EXPECT_FLOAT_EQ(r.get<Position>(e).x, 42.0f);
+}
+
+TEST(RegistryComponents, AddingExistingComponentOverwrites) {
+    // Permissive choice: add() doubles as a setter. Spec'd behavior.
+    Registry r;
+    EntityID e = r.create_entity();
+    r.add<Position>(e, Position{1, 1, 1});
+    r.add<Position>(e, Position{9, 9, 9});
+
+    EXPECT_TRUE(r.has<Position>(e));
+    EXPECT_FLOAT_EQ(r.get<Position>(e).x, 9.0f);
+}
+
+// ── Components: try_get ─────────────────────────────────────────
+
+TEST(RegistryComponents, TryGetReturnsPointerWhenPresent) {
+    Registry r;
+    EntityID e = r.create_entity();
+    r.add<Position>(e, Position{7, 8, 9});
+
+    Position* p = r.try_get<Position>(e);
+    ASSERT_NE(p, nullptr);
+    EXPECT_FLOAT_EQ(p->x, 7.0f);
+}
+
+TEST(RegistryComponents, TryGetReturnsNullWhenMissing) {
+    Registry r;
+    EntityID e = r.create_entity();
+    EXPECT_EQ(r.try_get<Position>(e), nullptr);
+    EXPECT_EQ(r.try_get<Velocity>(e), nullptr);
+}
+
+TEST(RegistryComponents, TryGetReturnsNullForInvalidEntity) {
+    Registry r;
+    EXPECT_EQ(r.try_get<Position>(kInvalidEntity), nullptr);
+    EXPECT_EQ(r.try_get<Position>(EntityID{999, 1}), nullptr);
+}
+
+// ── Components: remove ──────────────────────────────────────────
+
+TEST(RegistryComponents, RemoveMakesHasFalse) {
+    Registry r;
+    EntityID e = r.create_entity();
+    r.add<Position>(e, Position{});
+    ASSERT_TRUE(r.has<Position>(e));
+    r.remove<Position>(e);
+    EXPECT_FALSE(r.has<Position>(e));
+}
+
+TEST(RegistryComponents, RemoveOfMissingIsNoOp) {
+    Registry r;
+    EntityID e = r.create_entity();
+    r.remove<Position>(e);          // never had it
+    r.add<Position>(e, Position{});
+    r.remove<Position>(e);
+    r.remove<Position>(e);          // double-remove
+    EXPECT_FALSE(r.has<Position>(e));
+}
+
+TEST(RegistryComponents, RemoveDoesNotAffectOtherComponentTypes) {
+    Registry r;
+    EntityID e = r.create_entity();
+    r.add<Position>(e, Position{1, 2, 3});
+    r.add<Velocity>(e, Velocity{4, 5, 6});
+
+    r.remove<Position>(e);
+    EXPECT_FALSE(r.has<Position>(e));
+    EXPECT_TRUE(r.has<Velocity>(e));
+    EXPECT_FLOAT_EQ(r.get<Velocity>(e).dx, 4.0f);
+}
+
+TEST(RegistryComponents, RemoveDoesNotAffectOtherEntities) {
+    // Sparse-set remove uses swap-with-last; this test verifies the
+    // swapped-in entity's sparse pointer is still correct.
+    Registry r;
+    EntityID a = r.create_entity();
+    EntityID b = r.create_entity();
+    EntityID c = r.create_entity();
+    r.add<Position>(a, Position{1, 0, 0});
+    r.add<Position>(b, Position{2, 0, 0});
+    r.add<Position>(c, Position{3, 0, 0});
+
+    r.remove<Position>(b);  // swap-with-last: c moves into b's old slot
+
+    EXPECT_TRUE(r.has<Position>(a));
+    EXPECT_FALSE(r.has<Position>(b));
+    EXPECT_TRUE(r.has<Position>(c));
+    EXPECT_FLOAT_EQ(r.get<Position>(a).x, 1.0f);
+    EXPECT_FLOAT_EQ(r.get<Position>(c).x, 3.0f);
+}
+
+// ── Components: entity destruction strips components ────────────
+
+TEST(RegistryComponents, DestroyEntityRemovesAllItsComponents) {
+    // After destroy, the slot is reused. The new entity must NOT
+    // inherit the old entity's components.
+    Registry r;
+    EntityID original = r.create_entity();
+    r.add<Position>(original, Position{1, 2, 3});
+    r.add<Velocity>(original, Velocity{4, 5, 6});
+
+    r.destroy_entity(original);
+    EntityID reused = r.create_entity();
+    ASSERT_EQ(reused.id, original.id);  // same slot
+
+    EXPECT_FALSE(r.has<Position>(reused));
+    EXPECT_FALSE(r.has<Velocity>(reused));
+}
+
+// ── Empty / tag components ──────────────────────────────────────
+
+TEST(RegistryComponents, EmptyTagComponentWorks) {
+    Registry r;
+    EntityID e = r.create_entity();
+    r.add<Tag>(e, Tag{});
+    EXPECT_TRUE(r.has<Tag>(e));
+    r.remove<Tag>(e);
+    EXPECT_FALSE(r.has<Tag>(e));
+}
+
+// ── Add to invalid entity is no-op ──────────────────────────────
+
+TEST(RegistryComponents, AddToInvalidEntityIsNoOp) {
+    Registry r;
+    r.add<Position>(kInvalidEntity, Position{1, 2, 3});
+    r.add<Position>(EntityID{999, 1}, Position{1, 2, 3});
+    EXPECT_FALSE(r.has<Position>(kInvalidEntity));
 }
