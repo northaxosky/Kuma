@@ -9,6 +9,7 @@ target_sources(kuma-engine PRIVATE
     src/core/engine.cpp
     src/core/log.cpp
     src/core/time.cpp
+    src/core/transform.cpp
     src/platform/input.cpp
     src/platform/paths.cpp
     src/platform/window.cpp

@@ -24,6 +24,7 @@ add_executable(kuma-tests
     camera_test.cpp
     input_test.cpp
     time_test.cpp
+    transform_test.cpp
 )
 
 target_link_libraries(kuma-tests PRIVATE
