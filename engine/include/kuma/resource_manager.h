@@ -26,6 +26,12 @@ public:
     // file twice returns the same texture.
     const Texture* load_texture(const char* path);
 
+    // Load a texture from a `.ktex` binary file produced by kuma-bake.
+    // Same caching semantics as load_texture. Returns nullptr on
+    // failure (file missing, bad magic, version mismatch,
+    // unsupported format, truncated payload).
+    const Texture* load_texture_binary(const char* path);
+
     // Load a mesh from a model file (OBJ, etc.)
     // Returns nullptr on failure. Caches by path.
     const Mesh* load_mesh(const char* path);

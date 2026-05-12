@@ -20,6 +20,8 @@ struct Cli {
 enum Command {
     /// Convert an OBJ mesh into a .kmesh binary
     Mesh { input: PathBuf, output: PathBuf },
+    /// Convert a PNG/JPEG/TGA image into a .ktex binary (RGBA8)
+    Tex { input: PathBuf, output: PathBuf },
 }
 
 fn main() -> ExitCode {
@@ -27,6 +29,7 @@ fn main() -> ExitCode {
 
     let result: Result<(), kuma_bake::BakeError> = match cli.command {
         Command::Mesh { input, output } => kuma_bake::bake_mesh(&input, &output),
+        Command::Tex  { input, output } => kuma_bake::bake_texture(&input, &output),
     };
 
     match result {
