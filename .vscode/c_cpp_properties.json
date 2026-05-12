@@ -4,34 +4,22 @@
         {
             "name": "Kuma (Windows MSVC)",
 
-            // Prefer include paths from CMake. Requires the "CMake Tools"
-            // extension (ms-vscode.cmake-tools). When this provider is
-            // active, the settings below act as fallbacks.
+            // Source of truth: the CMake Tools extension. It knows
+            // every target's include paths, defines, and compiler
+            // flags directly from CMake, so adding a new dependency
+            // requires zero edits to this file.
             "configurationProvider": "ms-vscode.cmake-tools",
 
-            // Manual fallbacks in case CMake Tools isn't installed or
-            // hasn't configured yet. These keep IntelliSense working with
-            // the right language, standard, and first-party include root.
+            // The fields below are minimal fallbacks for the brief
+            // window before CMake Tools has configured the workspace
+            // (e.g. immediately after a fresh clone). Once the
+            // provider is active they are ignored.
             "cStandard": "c17",
             "cppStandard": "c++20",
             "intelliSenseMode": "windows-msvc-x64",
-
-            // Pick up MSVC automatically from a Developer environment.
             "compilerPath": "cl.exe",
-
             "includePath": [
-                "${workspaceFolder}/engine/include/**",
-                "${workspaceFolder}/engine/src/**",
-                "${workspaceFolder}/build/_deps/sdl3-src/include/**",
-                "${workspaceFolder}/build/_deps/googletest-src/googletest/include/**",
-                "${workspaceFolder}/build/_deps/imgui-src",
-                "${workspaceFolder}/build/_deps/imgui-src/backends"
-            ],
-
-            "defines": [
-                "_CRT_SECURE_NO_WARNINGS",
-                "WIN32",
-                "_WINDOWS"
+                "${workspaceFolder}/engine/include/**"
             ]
         }
     ]
