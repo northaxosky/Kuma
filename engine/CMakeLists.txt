@@ -31,8 +31,13 @@ target_include_directories(kuma-engine
 )
 
 # SDL3 — PRIVATE because game code should never use SDL directly
-# ImGui — PRIVATE; consumed via the debug overlay impl, not public API
-target_link_libraries(kuma-engine PRIVATE SDL3::SDL3 Vulkan::Vulkan imgui)
+# ImGui — PUBLIC because game code calls ImGui::* directly when
+# building custom debug panels (immediate-mode philosophy: no engine
+# wrapper around ImGui's already-well-designed API).
+target_link_libraries(kuma-engine
+    PRIVATE SDL3::SDL3 Vulkan::Vulkan
+    PUBLIC  imgui
+)
 
 # Compiler warnings — treat warnings seriously from the start
 target_compile_options(kuma-engine PRIVATE

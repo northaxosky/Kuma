@@ -1,6 +1,8 @@
 #include <kuma/kuma.h>
 #include <kuma/log.h>
 
+#include <imgui.h>
+
 namespace {
 
 // Marker component: "this entity should be drawn this frame."
@@ -101,6 +103,28 @@ int main() {
         // Debug overlay - F3 toggles visibility (handled inside debug
         // module). draw_default_panel is a no-op when hidden.
         kuma::debug::draw_default_panel();
+
+        // Custom debug panel: game-specific stats. ImGui calls
+        // direct from user code - no engine wrapper, this is the
+        // immediate-mode philosophy. Skip the work entirely when
+        // the overlay is hidden.
+        if (kuma::debug::is_visible()) {
+            const ImGuiViewport* vp = ImGui::GetMainViewport();
+            ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + 16.0f, vp->WorkPos.y + 16.0f),
+                                    ImGuiCond_FirstUseEver);
+            ImGui::SetNextWindowSize(ImVec2(280.0f, 0.0f), ImGuiCond_FirstUseEver);
+            if (ImGui::Begin("Sandbox", nullptr, ImGuiWindowFlags_NoCollapse)) {
+                const kuma::Vec3 p = camera.position();
+                ImGui::Text("Camera pos: (%.1f, %.1f, %.1f)", p.x, p.y, p.z);
+                ImGui::Text("Camera yaw: %.2f rad", camera.yaw());
+                ImGui::Text("Camera pitch: %.2f rad", camera.pitch());
+                ImGui::Separator();
+                ImGui::Text("Entities:   %zu", registry.view<kuma::Transform>().size());
+                ImGui::Text("Renderable: %zu",
+                            (registry.view<kuma::Transform, RenderTag>().size()));
+            }
+            ImGui::End();
+        }
 
         // ── Phase 4 driver: render system feeds the renderer ────
         render_system(registry, kuma::get_renderer());
