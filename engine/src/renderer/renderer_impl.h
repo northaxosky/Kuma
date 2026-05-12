@@ -169,6 +169,11 @@ private:
     Mat4 view_projection_ = Mat4::identity();
     bool has_view_projection_ = false;
 
+    // True between a successful begin_frame() and the matching
+    // end_frame(). draw() and end_frame() check this so they no-op
+    // safely when begin_frame failed (e.g. swapchain rebuild).
+    bool frame_recording_ = false;
+
     // Model matrix for the next draw. Identity by default, so callers
     // that don't care about transforms still get sensible behavior.
     Mat4 model_ = Mat4::identity();

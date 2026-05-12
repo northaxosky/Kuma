@@ -156,12 +156,7 @@ void RendererImpl::shutdown() {
 // ── Per-Frame Rendering ─────────────────────────────────────────
 
 bool RendererImpl::begin_frame() {
-    if (!has_view_projection_) {
-        kuma::log::error(
-            "Renderer missing view-projection matrix; call Renderer::set_view_projection() before "
-            "kuma::end_frame()");
-        return false;
-    }
+    frame_recording_ = false;
 
     vkWaitForFences(device_, 1, &in_flight_fences_[current_frame_], VK_TRUE,
                     std::numeric_limits<uint64_t>::max());
@@ -226,10 +221,13 @@ bool RendererImpl::begin_frame() {
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout_, 0, 1,
                             &descriptor_sets_[current_frame_], 0, nullptr);
 
+    frame_recording_ = true;
     return true;
 }
 
 void RendererImpl::draw() {
+    if (!frame_recording_) return;  // begin_frame failed (e.g. swapchain rebuild) - safe no-op
+
     VkCommandBuffer cmd = command_buffers_[current_frame_];
 
     // projection * view * model: model transforms first, then view, then project
@@ -242,6 +240,9 @@ void RendererImpl::draw() {
 }
 
 void RendererImpl::end_frame() {
+    if (!frame_recording_) return;  // begin_frame failed - nothing to submit
+    frame_recording_ = false;
+
     VkCommandBuffer cmd = command_buffers_[current_frame_];
 
     vkCmdEndRenderPass(cmd);

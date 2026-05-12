@@ -112,17 +112,20 @@ bool begin_frame() {
     // duration of the previous frame (0 on the first frame).
     time::tick();
 
+    // Open the renderer's command-buffer recording window. From here
+    // until end_frame, the user's UPDATE code can call
+    // renderer.draw() to record per-object draw calls. If this fails
+    // (swapchain rebuild, etc.) the recording window stays closed
+    // and draw() / end_frame() will safely no-op.
+    s_renderer.begin_frame();
+
     return true;
 }
 
 void end_frame() {
-    // Phase 4: RENDER + Phase 5: PRESENT — wrapped together because
-    // begin_frame() can return false on swapchain rebuild, in which
-    // case we must skip end_frame() to keep the renderer's internal
-    // state consistent.
-    if (s_renderer.begin_frame()) {
-        s_renderer.end_frame();
-    }
+    // Phase 4 + 5: end the render pass, submit, present. Internally
+    // no-ops if begin_frame failed to open the recording window.
+    s_renderer.end_frame();
 }
 
 Window& get_window() {
