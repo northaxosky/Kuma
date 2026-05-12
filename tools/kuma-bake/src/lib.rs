@@ -4,4 +4,7 @@
 //! re-exported from this module, so unit and integration tests can
 //! exercise the converters directly without spawning subprocesses.
 
-// Module declarations land here as commits 2-4 add real code.
+pub mod error;
+pub mod format;
+
+pub use error::BakeError;
