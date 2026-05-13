@@ -26,6 +26,7 @@ add_executable(kuma-tests
     debug_test.cpp
     ecs_test.cpp
     input_test.cpp
+    physics_test.cpp
     time_test.cpp
     transform_test.cpp
     integration/asset_format_test.cpp

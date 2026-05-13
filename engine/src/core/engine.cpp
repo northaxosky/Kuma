@@ -65,6 +65,15 @@ bool init(const EngineConfig& config) {
         return false;
     }
 
+    if (!physics::init(config.physics)) {
+        s_resource_manager.shutdown();
+        s_renderer.shutdown();
+        s_window.destroy();
+        input::shutdown();
+        SDL_Quit();
+        return false;
+    }
+
     // Load default resources via the resource manager
     const auto* mesh = s_resource_manager.load_mesh_binary(
         platform::exe_relative("assets/models/quad.kmesh").c_str());
@@ -98,6 +107,7 @@ bool init(const EngineConfig& config) {
 void shutdown() {
     s_renderer.wait_idle();         // GPU finishes all work
     debug::shutdown();              // tears down ImGui (must be before renderer)
+    physics::shutdown();            // release Jolt resources before SDL/window go
     s_resource_manager.shutdown();  // safe to destroy textures/meshes
     s_renderer.shutdown();          // destroy Vulkan device last
     s_window.destroy();

@@ -27,6 +27,10 @@ struct EngineConfig {
     // to vsync; flip to PresentMode::Mailbox for competitive low-
     // latency scenarios.
     PresentMode present_mode = PresentMode::Vsync;
+
+    // Physics tuning. Defaults match a few-hundred-body arena
+    // scenario; bump body limits or temp allocator for stress tests.
+    physics::PhysicsConfig physics;
 };
 
 // Initialize the engine. Call once at startup.
