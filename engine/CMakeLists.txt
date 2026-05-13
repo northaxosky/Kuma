@@ -13,6 +13,8 @@ target_sources(kuma-engine PRIVATE
     src/core/log.cpp
     src/core/time.cpp
     src/core/transform.cpp
+    src/physics/jolt_globals.cpp
+    src/physics/physics.cpp
     src/platform/input.cpp
     src/platform/paths.cpp
     src/platform/window.cpp
@@ -32,11 +34,12 @@ target_include_directories(kuma-engine
 )
 
 # SDL3 — PRIVATE because game code should never use SDL directly
+# Jolt — PRIVATE because public physics.h exposes only opaque types
 # ImGui — PUBLIC because game code calls ImGui::* directly when
 # building custom debug panels (immediate-mode philosophy: no engine
 # wrapper around ImGui's already-well-designed API).
 target_link_libraries(kuma-engine
-    PRIVATE SDL3::SDL3 Vulkan::Vulkan
+    PRIVATE SDL3::SDL3 Vulkan::Vulkan Jolt
     PUBLIC  imgui
 )
 

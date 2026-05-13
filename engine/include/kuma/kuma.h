@@ -7,6 +7,7 @@
 #include <kuma/debug.h>
 #include <kuma/ecs.h>
 #include <kuma/input.h>
+#include <kuma/physics.h>
 #include <kuma/platform.h>
 #include <kuma/renderer.h>
 #include <kuma/resource_manager.h>

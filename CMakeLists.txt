@@ -74,6 +74,40 @@ target_include_directories(imgui PUBLIC
 )
 target_link_libraries(imgui PUBLIC SDL3::SDL3 Vulkan::Vulkan)
 
+# ── Jolt Physics ──────────────────────────────────────────────────
+# Jorrit Rouwé's MIT-licensed engine, used by Horizon Forbidden West
+# and Godot 4. Disable the in-tree samples / tests / install rules so
+# only the core Jolt static library gets built. SOURCE_SUBDIR points
+# at Build/ because Jolt's CMakeLists lives there, not at repo root.
+set(TARGET_UNIT_TESTS         OFF CACHE BOOL "" FORCE)
+set(TARGET_HELLO_WORLD        OFF CACHE BOOL "" FORCE)
+set(TARGET_PERFORMANCE_TEST   OFF CACHE BOOL "" FORCE)
+set(TARGET_SAMPLES            OFF CACHE BOOL "" FORCE)
+set(TARGET_VIEWER             OFF CACHE BOOL "" FORCE)
+set(ENABLE_INSTALL            OFF CACHE BOOL "" FORCE)
+# Jolt defaults this to ON which makes its build inject -Werror style
+# flags. We keep our own warning policy in engine/CMakeLists.txt.
+set(ENABLE_ALL_WARNINGS       OFF CACHE BOOL "" FORCE)
+# Jolt defaults this to ON which would clobber the parent project's
+# CMAKE_CXX_FLAGS_DEBUG/RELEASE. Hands off our build flags.
+set(OVERRIDE_CXX_FLAGS        OFF CACHE BOOL "" FORCE)
+# LTO on Jolt slows debug iteration; flip ON later if profiling
+# shows the physics step is hot.
+set(INTERPROCEDURAL_OPTIMIZATION OFF CACHE BOOL "" FORCE)
+# Match the parent project's MSVC CRT (we use the dynamic /MDd by
+# default). Jolt defaults to /MT static which causes LNK2038 mismatch
+# errors when linked into a /MD consumer.
+set(USE_STATIC_MSVC_RUNTIME_LIBRARY OFF CACHE BOOL "" FORCE)
+
+FetchContent_Declare(
+    JoltPhysics
+    GIT_REPOSITORY https://github.com/jrouwe/JoltPhysics.git
+    GIT_TAG        v5.5.0
+    GIT_SHALLOW    TRUE
+    SOURCE_SUBDIR  Build
+)
+FetchContent_MakeAvailable(JoltPhysics)
+
 # ── Sub-projects ─────────────────────────────────────────────────
 add_subdirectory(engine)
 add_subdirectory(tools/kuma-bake)
