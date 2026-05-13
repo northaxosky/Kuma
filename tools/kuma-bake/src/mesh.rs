@@ -7,11 +7,9 @@
 //! followed by packed Vertex + u16 index arrays.
 
 use crate::error::BakeError;
-use crate::format::{KMESH_VERSION, KMeshHeader, MAGIC_KMESH, Vertex};
+use crate::format::{Vertex, write_kmesh};
 
 use std::collections::HashMap;
-use std::fs;
-use std::io::Write;
 use std::path::Path;
 
 /// Bake a single OBJ file into a `.kmesh`. Creates parent
@@ -99,25 +97,6 @@ pub fn bake_mesh(input: &Path, output: &Path) -> Result<(), BakeError> {
         }
     }
 
-    // 3. Write the binary blob: header + vertex array + index array.
-    let header_size:  u32 = std::mem::size_of::<KMeshHeader>() as u32;
-    let vertex_bytes: u32 = (vertices.len() * std::mem::size_of::<Vertex>()) as u32;
-    let header: KMeshHeader = KMeshHeader {
-        magic:         MAGIC_KMESH,
-        version:       KMESH_VERSION,
-        vertex_count:  vertices.len() as u32,
-        index_count:   indices.len() as u32,
-        vertex_offset: header_size,
-        index_offset:  header_size + vertex_bytes,
-        _reserved:     [0; 2],
-    };
-
-    if let Some(parent) = output.parent() {
-        fs::create_dir_all(parent).map_err(|e| BakeError::io(parent, e))?;
-    }
-    let mut file: fs::File = fs::File::create(output).map_err(|e| BakeError::io(output, e))?;
-    file.write_all(bytemuck::bytes_of(&header)).map_err(|e| BakeError::io(output, e))?;
-    file.write_all(bytemuck::cast_slice(&vertices)).map_err(|e| BakeError::io(output, e))?;
-    file.write_all(bytemuck::cast_slice(&indices)).map_err(|e| BakeError::io(output, e))?;
-    Ok(())
+    // 3. Write the binary blob via the shared kmesh writer.
+    write_kmesh(output, &vertices, &indices)
 }

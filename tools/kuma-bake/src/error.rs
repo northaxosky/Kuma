@@ -22,6 +22,9 @@ pub enum BakeError {
     #[error("image decode failed: {0}")]
     Image(#[from] image::ImageError),
 
+    #[error("glTF parse failed: {0}")]
+    Gltf(#[from] gltf::Error),
+
     #[error("invalid input: {0}")]
     Invalid(String),
 }

@@ -229,3 +229,79 @@ TEST(IntegrationAssetPipelineTex, PixelsRoundTripThroughBake) {
     EXPECT_TRUE(pixel_equals(pixel_at(3, 3),       255, 255, 255, 255)) << "bottom-right white";
     EXPECT_TRUE(pixel_equals(pixel_at(1, 1),       128, 128, 128, 255)) << "interior gray";
 }
+
+// ── glTF / GLB roundtrip ────────────────────────────────────────
+// The fixture triangle.glb has 3 vertices with distinct UVs (0,0),
+// (1,0.25), (0.5,1), shared normal (0,0,1), and is referenced by a
+// node with translation (5,0,0). The bake must:
+//   - Apply the node transform (X shifts by +5)
+//   - Preserve UVs unchanged (NO V flip - glTF uses upper-left
+//     origin, opposite of OBJ)
+//   - Preserve normals
+// The 3 distinct UVs mean a silent double-flip would be visible
+// (one of (1,0.75), (0.5,0) etc would appear instead).
+
+TEST(IntegrationAssetPipelineGltf, BakedGlbHasValidHeader) {
+    const fs::path input = fixture("gltf/triangle.glb");
+    const fs::path output = temp_output_path("BakedGlbHasValidHeader");
+    fs::remove(output);
+    ASSERT_EQ(run_kuma_bake({"gltf", input.string(), output.string()}), 0)
+        << "kuma-bake gltf exited with non-zero status";
+    ASSERT_TRUE(fs::exists(output));
+
+    const std::vector<uint8_t> bytes = read_binary(output);
+    KMeshHeader hdr{};
+    ASSERT_EQ(parse_kmesh_header(bytes.data(), bytes.size(), hdr), ParseResult::Ok);
+    EXPECT_EQ(hdr.vertex_count, 3u);
+    EXPECT_EQ(hdr.index_count, 3u);
+}
+
+TEST(IntegrationAssetPipelineGltf, NodeTransformIsAppliedToPositions) {
+    const fs::path input = fixture("gltf/triangle.glb");
+    const fs::path output = temp_output_path("NodeTransformIsAppliedToPositions");
+    fs::remove(output);
+    ASSERT_EQ(run_kuma_bake({"gltf", input.string(), output.string()}), 0);
+
+    const std::vector<uint8_t> bytes = read_binary(output);
+    KMeshHeader hdr{};
+    ASSERT_EQ(parse_kmesh_header(bytes.data(), bytes.size(), hdr), ParseResult::Ok);
+    const auto* verts = reinterpret_cast<const Vertex*>(bytes.data() + hdr.vertex_offset);
+
+    // Raw positions (0,0,0), (1,0,0), (0,1,0). Node translates by
+    // (5,0,0). Every baked vertex must therefore have X >= 5.
+    for (uint32_t i = 0; i < hdr.vertex_count; ++i) {
+        EXPECT_GE(verts[i].pos[0], 5.0f) << "vertex " << i << " pos.x=" << verts[i].pos[0]
+                                          << " - node transform not applied";
+    }
+}
+
+TEST(IntegrationAssetPipelineGltf, UvsAreNotFlipped) {
+    // Most important regression test for the gltf path. OBJ baker
+    // flips V on the way in (lower-left -> upper-left); glTF baker
+    // must NOT flip (already upper-left). Three distinct UVs in the
+    // fixture mean ANY flip would change at least two of them.
+    const fs::path input = fixture("gltf/triangle.glb");
+    const fs::path output = temp_output_path("UvsAreNotFlipped");
+    fs::remove(output);
+    ASSERT_EQ(run_kuma_bake({"gltf", input.string(), output.string()}), 0);
+
+    const std::vector<uint8_t> bytes = read_binary(output);
+    KMeshHeader hdr{};
+    ASSERT_EQ(parse_kmesh_header(bytes.data(), bytes.size(), hdr), ParseResult::Ok);
+    const auto* verts = reinterpret_cast<const Vertex*>(bytes.data() + hdr.vertex_offset);
+
+    auto uv_present = [&](float u, float v) {
+        for (uint32_t i = 0; i < hdr.vertex_count; ++i) {
+            if (std::fabs(verts[i].uv[0] - u) < 1e-5f &&
+                std::fabs(verts[i].uv[1] - v) < 1e-5f) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    // Each fixture UV must appear EXACTLY (no flip).
+    EXPECT_TRUE(uv_present(0.0f, 0.0f))   << "UV (0,0) missing - V was flipped";
+    EXPECT_TRUE(uv_present(1.0f, 0.25f))  << "UV (1,0.25) missing - V was flipped";
+    EXPECT_TRUE(uv_present(0.5f, 1.0f))   << "UV (0.5,1.0) missing - V was flipped";
+}

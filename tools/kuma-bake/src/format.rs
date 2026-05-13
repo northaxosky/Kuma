@@ -163,3 +163,40 @@ mod tests {
         assert_eq!(parsed, v);
     }
 }
+
+// ── Shared .kmesh writer ────────────────────────────────────────
+// Produces the canonical on-disk layout: 32-byte KMeshHeader,
+// then `vertices.len()` Vertex structs, then `indices.len()` u16
+// indices. Used by every baker that emits .kmesh (currently mesh
+// and gltf). Centralized here so the byte layout is described in
+// one place; if the format ever changes, this is the only writer
+// that needs updating.
+
+use std::fs;
+use std::io::Write;
+use std::path::Path;
+
+use crate::error::BakeError;
+
+pub fn write_kmesh(output: &Path, vertices: &[Vertex], indices: &[u16]) -> Result<(), BakeError> {
+    let header_size:  u32 = std::mem::size_of::<KMeshHeader>() as u32;
+    let vertex_bytes: u32 = (vertices.len() * std::mem::size_of::<Vertex>()) as u32;
+    let header: KMeshHeader = KMeshHeader {
+        magic:         MAGIC_KMESH,
+        version:       KMESH_VERSION,
+        vertex_count:  vertices.len() as u32,
+        index_count:   indices.len() as u32,
+        vertex_offset: header_size,
+        index_offset:  header_size + vertex_bytes,
+        _reserved:     [0; 2],
+    };
+
+    if let Some(parent) = output.parent() {
+        fs::create_dir_all(parent).map_err(|e| BakeError::io(parent, e))?;
+    }
+    let mut file: fs::File = fs::File::create(output).map_err(|e| BakeError::io(output, e))?;
+    file.write_all(bytemuck::bytes_of(&header)).map_err(|e| BakeError::io(output, e))?;
+    file.write_all(bytemuck::cast_slice(vertices)).map_err(|e| BakeError::io(output, e))?;
+    file.write_all(bytemuck::cast_slice(indices)).map_err(|e| BakeError::io(output, e))?;
+    Ok(())
+}
