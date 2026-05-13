@@ -198,9 +198,10 @@ bool RendererImpl::begin_frame() {
     vkCmdBeginRenderPass(cmd, &rp_info, VK_SUBPASS_CONTENTS_INLINE);
 
     // Per-frame state that doesn't change between draws: pipeline,
-    // viewport, scissor, vertex/index buffers, descriptor sets. The
-    // model matrix and the draw call itself live in draw(), called
-    // once per object the game wants rendered.
+    // viewport, scissor, descriptor sets. Per-mesh state (vertex
+    // and index buffer binds) lives in draw() so the game can
+    // render different meshes within one frame by calling
+    // set_mesh() between draw() calls.
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline_);
 
     VkViewport viewport{};
@@ -217,12 +218,6 @@ bool RendererImpl::begin_frame() {
     scissor.extent = swapchain_extent_;
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    VkBuffer buffers[] = {mesh_->vertex_buffer};
-    VkDeviceSize offsets[] = {0};
-    vkCmdBindVertexBuffers(cmd, 0, 1, buffers, offsets);
-
-    vkCmdBindIndexBuffer(cmd, mesh_->index_buffer, 0, VK_INDEX_TYPE_UINT16);
-
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout_, 0, 1,
                             &descriptor_sets_[current_frame_], 0, nullptr);
 
@@ -232,12 +227,24 @@ bool RendererImpl::begin_frame() {
 
 void RendererImpl::draw() {
     if (!frame_recording_) return;  // begin_frame failed (e.g. swapchain rebuild) - safe no-op
+    if (!mesh_) {
+        // No mesh bound - silently skip. Calling draw() before any
+        // set_mesh() is benign (sandbox can call draw() in a loop
+        // that gates on having geometry to render).
+        return;
+    }
 
     VkCommandBuffer cmd = command_buffers_[current_frame_];
 
+    // Per-mesh state. Cheap on Vulkan; the driver fast-paths
+    // re-binding the same buffer pointers between draws.
+    VkBuffer buffers[] = {mesh_->vertex_buffer};
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(cmd, 0, 1, buffers, offsets);
+    vkCmdBindIndexBuffer(cmd, mesh_->index_buffer, 0, VK_INDEX_TYPE_UINT16);
+
     // projection * view * model: model transforms first, then view, then project
     Mat4 mvp = view_projection_ * model_;
-
     vkCmdPushConstants(cmd, pipeline_layout_, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(Mat4),
                        mvp.ptr());
 
