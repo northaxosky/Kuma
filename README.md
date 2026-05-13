@@ -21,7 +21,7 @@ Kuma is designed for small, indie games — prioritizing simplicity, modularity,
 - **Transform** — position + quaternion rotation + scale, producing a model matrix; sandbox spins the quad to demo
 - **ECS** — sparse-set Registry with generational EntityID handles, sparse-set component storage, and `view<T...>()` queries with structured bindings; sandbox demos a 100-entity grid driven by spin + render systems
 - **Debug overlay** — Dear ImGui integration with a custom Kuma Dark style and Cascadia Mono font; F3 toggles a default panel (FPS, frame time, 1% low, 60-frame sparkline). Game code calls `ImGui::*` directly for custom panels.
-- **Asset pipeline** — `kuma-bake` (Rust) converts source assets (.obj, .png, .jpg, .tga) into the engine's binary format (.kmesh, .ktex). Engine loads only baked binaries at runtime; no source-format parsing in the hot path.
+- **Asset pipeline** — `kuma-bake` (Rust) converts source assets (.obj, .png, .jpg, .tga, .gltf, .glb) into the engine's binary format (.kmesh, .ktex). Engine loads only baked binaries at runtime; no source-format parsing in the hot path. Sandbox renders a glTF icosahedron via a debug-normal pipeline alongside the textured ECS quad grid.
 - **Input** — keyboard & mouse polling with edge detection (pressed/released this frame)
 - **Time** — monotonic delta / total / frame count with anti-spiral clamp
 - **Frame orchestration** — engine-owned `begin_frame()` / `end_frame()` wrapping a 5-phase contract (input → time → update → render → present)

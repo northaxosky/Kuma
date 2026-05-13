@@ -53,6 +53,21 @@ int main() {
     kuma::FreeFlyCameraController camera_controller;
     camera_controller.mouse_sensitivity = 0.0025f;
 
+    // Load the glTF icosahedron alongside the engine's default quad
+    // mesh. We render it once per frame in front of the ECS quad
+    // grid using the renderer's debug-normal pipeline, which paints
+    // each fragment by its vertex normal as RGB. Visual proof that
+    // the Rust glTF baker -> binary parser -> engine load -> Vulkan
+    // upload chain works end to end.
+    const auto* icosahedron = kuma::get_resource_manager().load_mesh_binary(
+        kuma::platform::exe_relative("assets/models/icosahedron.kmesh").c_str());
+    if (!icosahedron) {
+        kuma::log::warn("Icosahedron asset missing; sandbox will run without the glTF demo");
+    }
+
+    kuma::Transform icosahedron_transform;
+    icosahedron_transform.set_position({0.0f, 0.0f, 12.0f});  // sit in front of the grid
+
     // ── Build the ECS world: 10x10 grid of spinning quads ───────
     // Every entity has Transform (its position/rotation/scale) and
     // RenderTag (marks it as drawable). The grid offsets lift the
@@ -72,7 +87,8 @@ int main() {
     }
 
     kuma::log::info(
-        "Sandbox ready: %d ECS entities. Esc to quit, WASD to move, Q/E up/down, hold RMB to look.",
+        "Sandbox ready: %d ECS entities + glTF icosahedron. Esc to quit, WASD to move, "
+        "Q/E up/down, hold RMB to look.",
         kGridSize * kGridSize);
 
     while (kuma::begin_frame()) {
@@ -123,8 +139,32 @@ int main() {
             ImGui::End();
         }
 
-        // Render every entity tagged for drawing.
+        // Render every entity tagged for drawing using the textured
+        // pipeline (engine default).
         render_system(registry, kuma::get_renderer());
+
+        // Then draw the glTF icosahedron with the debug-normal
+        // pipeline, which paints each fragment by its normal.
+        // Demonstrates: glTF -> .kmesh -> engine load -> custom
+        // pipeline render. After this draw, the next frame's
+        // render_system loop re-binds the quad mesh, but we also
+        // need to switch the pipeline back to textured.
+        if (icosahedron) {
+            icosahedron_transform.set_rotation_euler(kuma::time::total() * 0.5f,
+                                                      kuma::time::total() * 0.3f, 0.0f);
+            kuma::get_renderer().set_mesh(icosahedron);
+            kuma::get_renderer().set_model_matrix(icosahedron_transform.model_matrix());
+            kuma::get_renderer().set_pipeline(1);  // debug normal
+            kuma::get_renderer().draw();
+
+            // Restore quad mesh + textured pipeline so the next
+            // frame's render_system starts in the expected state.
+            // (The renderer's set_mesh state persists across frames.)
+            kuma::get_renderer().set_mesh(reinterpret_cast<const void*>(
+                kuma::get_resource_manager().load_mesh_binary(
+                    kuma::platform::exe_relative("assets/models/quad.kmesh").c_str())));
+            kuma::get_renderer().set_pipeline(0);
+        }
 
         if (kuma::input::was_mouse_button_pressed(kuma::MouseButton::Left)) {
             const kuma::Vec2 p = kuma::input::mouse_position();

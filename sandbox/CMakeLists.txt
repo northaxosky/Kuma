@@ -24,6 +24,7 @@ add_custom_command(TARGET sandbox POST_BUILD
 # adds a custom command that runs kuma-bake whenever the source
 # file changes; the outputs land in build/assets/{models,textures}/.
 kuma_bake_mesh(${CMAKE_SOURCE_DIR}/assets/source/models/quad.obj)
+kuma_bake_gltf(${CMAKE_SOURCE_DIR}/assets/source/models/icosahedron.glb)
 kuma_bake_texture(${CMAKE_SOURCE_DIR}/assets/source/textures/VaultBoyNV.png)
 
 # Roll every baked asset into a single ALL target so they all

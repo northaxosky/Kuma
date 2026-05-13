@@ -1,20 +1,10 @@
 // ── Platform Paths ──────────────────────────────────────────────
-// Launcher-independent path resolution.
+// Internal include that re-exports the public <kuma/platform.h> -
+// kept as a separate header so engine internals can include this
+// path-style "internal" header consistently with the other
+// internal headers in this directory.
 
 #pragma once
 
-#include <string>
+#include <kuma/platform.h>
 
-namespace kuma::platform {
-
-// Returns an absolute path built from the running executable's
-// directory and the given relative path. Works regardless of the
-// process's current working directory, which matters because VS
-// Code's F5, `ctest`, and a double-click from Explorer all hand
-// the engine a different CWD.
-//
-// Requires SDL to be initialized (engine::init handles this
-// before any callsite runs).
-std::string exe_relative(const char* relative_path);
-
-}  // namespace kuma::platform
