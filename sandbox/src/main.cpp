@@ -3,17 +3,26 @@
 
 #include <imgui.h>
 
+#include <vector>
+
 namespace {
 
 // Empty marker component: "this entity should be drawn this frame."
 // ECS handles zero-sized components without wasting space.
 struct RenderTag {};
 
-// Spin every transform around the +Y axis. Plain free function over
-// a single-component view - this is what an ECS "system" looks like.
+// Marks an entity as a runtime-spawned physics icosahedron. R-key
+// removes everything tagged with this, leaving the grid + the
+// decorative spinner alone.
+struct SpawnedTag {};
+
+// Spin every grid quad around the +Y axis. Plain free function over
+// a two-component view - the SpawnedTag filter skips the runtime
+// icosahedrons so physics owns their rotations.
 void spin_system(kuma::Registry& registry, float angle_radians) {
-    for (auto [e, transform] : registry.view<kuma::Transform>()) {
+    for (auto [e, transform, tag] : registry.view<kuma::Transform, RenderTag>()) {
         (void)e;
+        (void)tag;
         transform.set_rotation_euler(angle_radians, 0.0f, 0.0f);
     }
 }
@@ -27,6 +36,34 @@ void render_system(kuma::Registry& registry, kuma::Renderer& renderer) {
         renderer.set_model_matrix(transform.model_matrix());
         renderer.draw();
     }
+}
+
+// Spawn a Dynamic physics icosahedron a few units in front of the
+// camera. Gravity does the rest. The icosahedron mesh is rendered
+// over a sphere collider - close enough for the visual demo.
+kuma::EntityID spawn_physics_icosahedron(kuma::Registry& registry,
+                                          const kuma::Camera& camera) {
+    constexpr float kSpawnDistance = 3.0f;
+    constexpr float kRadius = 0.3f;
+
+    kuma::EntityID e = registry.create_entity();
+
+    kuma::Transform t;
+    t.set_position(camera.position() + camera.forward() * kSpawnDistance);
+    t.set_scale(kRadius * 2.0f);  // icosahedron mesh is unit-sized
+    registry.add(e, t);
+
+    kuma::physics::PhysicsBody body;
+    body.type = kuma::physics::BodyType::Dynamic;
+    body.shape = kuma::physics::BodyShape::Sphere;
+    body.dimensions = {kRadius, 0.0f, 0.0f};
+    body.restitution = 0.4f;
+    body.friction = 0.6f;
+    body.layer = kuma::physics::PhysicsLayer::Dynamic;
+    registry.add(e, body);
+
+    registry.add(e, SpawnedTag{});
+    return e;
 }
 
 }  // namespace
@@ -65,6 +102,9 @@ int main() {
         kuma::log::warn("Icosahedron asset missing; sandbox will run without the glTF demo");
     }
 
+    const auto* quad_mesh = kuma::get_resource_manager().load_mesh_binary(
+        kuma::platform::exe_relative("assets/models/quad.kmesh").c_str());
+
     kuma::Transform icosahedron_transform;
     icosahedron_transform.set_position({0.0f, 0.0f, 12.0f});  // sit in front of the grid
 
@@ -86,10 +126,33 @@ int main() {
         }
     }
 
+    // ── Physics scene: invisible static floor ────────────────────
+    // Sits a comfortable distance below the camera so spawned bodies
+    // have somewhere to land. No render tag, no mesh, no draw - the
+    // floor exists only as a collision plane for the simulation.
+    constexpr float kFloorY = -8.0f;
+    constexpr float kFloorHalfExtents = 30.0f;
+    {
+        kuma::EntityID floor = registry.create_entity();
+        kuma::Transform t;
+        t.set_position({0.0f, kFloorY, 0.0f});
+        registry.add(floor, t);
+
+        kuma::physics::PhysicsBody body;
+        body.type = kuma::physics::BodyType::Static;
+        body.shape = kuma::physics::BodyShape::Box;
+        body.dimensions = {kFloorHalfExtents, 0.5f, kFloorHalfExtents};
+        body.layer = kuma::physics::PhysicsLayer::StaticWorld;
+        registry.add(floor, body);
+    }
+
+    constexpr uint32_t kMaxSpawned = 200;
+    std::vector<kuma::EntityID> spawned;
+
     kuma::log::info(
-        "Sandbox ready: %d ECS entities + glTF icosahedron. Esc to quit, WASD to move, "
-        "Q/E up/down, hold RMB to look.",
-        kGridSize * kGridSize);
+        "Sandbox ready: %d quads + glTF spinner + physics floor at y=%.1f. "
+        "F spawns icosahedron, R clears them. WASD/QE/RMB to fly.",
+        kGridSize * kGridSize, kFloorY);
 
     while (kuma::begin_frame()) {
         if (kuma::input::was_key_pressed(kuma::Key::Escape)) {
@@ -107,6 +170,28 @@ int main() {
 
         camera_controller.update(camera);
         kuma::get_renderer().set_view_projection(camera.view_projection());
+
+        // F spawns an icosahedron in front of the camera. Spawn is
+        // capped so the body pool can't exhaust accidentally.
+        if (kuma::input::was_key_pressed(kuma::Key::F) && spawned.size() < kMaxSpawned) {
+            spawned.push_back(spawn_physics_icosahedron(registry, camera));
+        }
+
+        // R wipes every spawned body. destroy_entity routes through
+        // physics so the Jolt-side body is freed alongside the ECS slot.
+        if (kuma::input::was_key_pressed(kuma::Key::R) && !spawned.empty()) {
+            for (kuma::EntityID e : spawned) {
+                kuma::physics::destroy_entity(registry, e);
+            }
+            spawned.clear();
+            kuma::log::info("Spawned bodies cleared");
+        }
+
+        // Step physics: integrate forces, resolve collisions, sync
+        // dynamic body poses back into Transforms. Runs before the
+        // visual rotation system so the icosahedron view reflects
+        // the post-physics state for this frame.
+        kuma::physics::simulate(kuma::time::delta(), registry);
 
         // Run gameplay systems in declared order.
         spin_system(registry, kuma::time::total());
@@ -135,6 +220,11 @@ int main() {
                 ImGui::Text("Entities:   %zu", registry.view<kuma::Transform>().size());
                 ImGui::Text("Renderable: %zu",
                             (registry.view<kuma::Transform, RenderTag>().size()));
+
+                kuma::debug::section_header("Physics");
+                ImGui::Text("Bodies:    %u", kuma::physics::body_count());
+                ImGui::Text("Spawned:   %zu / %u", spawned.size(), kMaxSpawned);
+                ImGui::TextDisabled("F to spawn, R to reset");
             }
             ImGui::End();
         }
@@ -143,26 +233,31 @@ int main() {
         // pipeline (engine default).
         render_system(registry, kuma::get_renderer());
 
-        // Then draw the glTF icosahedron with the debug-normal
-        // pipeline, which paints each fragment by its normal.
-        // Demonstrates: glTF -> .kmesh -> engine load -> custom
-        // pipeline render. After this draw, the next frame's
-        // render_system loop re-binds the quad mesh, but we also
-        // need to switch the pipeline back to textured.
+        // Draw the icosahedron mesh in two flavors: the decorative
+        // spinner at the original anchor, then every spawned physics
+        // icosahedron. Both share the debug-normal pipeline so the
+        // mesh + pipeline bind happens once.
         if (icosahedron) {
+            kuma::get_renderer().set_mesh(icosahedron);
+            kuma::get_renderer().set_pipeline(1);  // debug normal
+
             icosahedron_transform.set_rotation_euler(kuma::time::total() * 0.5f,
                                                       kuma::time::total() * 0.3f, 0.0f);
-            kuma::get_renderer().set_mesh(icosahedron);
             kuma::get_renderer().set_model_matrix(icosahedron_transform.model_matrix());
-            kuma::get_renderer().set_pipeline(1);  // debug normal
             kuma::get_renderer().draw();
+
+            for (auto [e, transform, tag] : registry.view<kuma::Transform, SpawnedTag>()) {
+                (void)e;
+                (void)tag;
+                kuma::get_renderer().set_model_matrix(transform.model_matrix());
+                kuma::get_renderer().draw();
+            }
 
             // Restore quad mesh + textured pipeline so the next
             // frame's render_system starts in the expected state.
-            // (The renderer's set_mesh state persists across frames.)
-            kuma::get_renderer().set_mesh(reinterpret_cast<const void*>(
-                kuma::get_resource_manager().load_mesh_binary(
-                    kuma::platform::exe_relative("assets/models/quad.kmesh").c_str())));
+            if (quad_mesh) {
+                kuma::get_renderer().set_mesh(quad_mesh);
+            }
             kuma::get_renderer().set_pipeline(0);
         }
 
