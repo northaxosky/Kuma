@@ -251,8 +251,10 @@ void push_kinematic_targets(Registry& registry, float dt) {
     for (auto [entity, body, transform] : registry.view<PhysicsBody, Transform>()) {
         if (!body.created) continue;
         if (body.type != BodyType::Kinematic) continue;
+        auto* rec = g_state->bodies.lookup(entity);
+        if (rec == nullptr) continue;
         bi.MoveKinematic(
-            g_state->bodies.lookup(entity)->jolt_id,
+            rec->jolt_id,
             to_rvec3(transform.position()),
             to_quat(transform.rotation()),
             dt);
@@ -265,14 +267,20 @@ void push_kinematic_targets(Registry& registry, float dt) {
 // skip them; kinematic Transforms are game-owned so we skip those
 // too (the game's writes are the source of truth there).
 void sync_dynamic_transforms(Registry& registry) {
-    const JPH::BodyInterface& bi = g_state->system->GetBodyInterfaceNoLock();
+    // Use the locking BodyInterface variant: PhysicsSystem::Update has
+    // returned by now and its worker threads have joined, so the bodies
+    // aren't actively contended - but the locking variant is the
+    // documented "safe outside callbacks" API and the per-call cost is
+    // negligible at our scale.
+    JPH::BodyInterface& bi = g_state->system->GetBodyInterface();
 
     for (auto [entity, body, transform] : registry.view<PhysicsBody, Transform>()) {
         if (!body.created) continue;
         if (body.type != BodyType::Dynamic) continue;
-        const JPH::BodyID id = g_state->bodies.lookup(entity)->jolt_id;
-        const JPH::RVec3 pos = bi.GetPosition(id);
-        const JPH::Quat rot = bi.GetRotation(id);
+        auto* rec = g_state->bodies.lookup(entity);
+        if (rec == nullptr) continue;
+        const JPH::RVec3 pos = bi.GetPosition(rec->jolt_id);
+        const JPH::Quat rot = bi.GetRotation(rec->jolt_id);
         transform.set_position(from_rvec3(pos));
         transform.set_rotation(from_quat(rot));
     }
