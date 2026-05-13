@@ -102,6 +102,11 @@ public:
     // Set resources loaded by the resource manager
     void set_texture(const Texture* texture);
     void set_mesh(const Mesh* mesh);
+
+    // Pick which graphics pipeline subsequent draw() calls use.
+    // 0 = textured (default), 1 = debug-normal visualizer.
+    void set_pipeline(uint32_t index);
+
     void set_view_projection(const Mat4& view_projection);
     void set_model_matrix(const Mat4& model);
     void draw();
@@ -125,7 +130,8 @@ private:
     VkExtent2D choose_extent() const;
 
     // ── pipeline.cpp ────────────────────────────────────────────
-    bool create_graphics_pipeline();
+    bool create_graphics_pipelines();
+    VkPipeline build_pipeline(const char* vert_spv, const char* frag_spv);
     VkShaderModule create_shader_module(const std::vector<char>& code) const;
 
     // ── resources.cpp ───────────────────────────────────────────
@@ -171,7 +177,9 @@ private:
 
     // Graphics pipeline
     VkPipelineLayout pipeline_layout_ = VK_NULL_HANDLE;
-    VkPipeline graphics_pipeline_ = VK_NULL_HANDLE;
+    VkPipeline graphics_pipeline_ = VK_NULL_HANDLE;          // textured (pipeline 0)
+    VkPipeline debug_normal_pipeline_ = VK_NULL_HANDLE;      // debug normal viz (pipeline 1)
+    uint32_t active_pipeline_index_ = 0;
 
     // Resources (owned by ResourceManager, renderer borrows pointers)
     const Mesh* mesh_ = nullptr;

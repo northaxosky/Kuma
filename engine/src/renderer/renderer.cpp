@@ -54,6 +54,10 @@ void Renderer::set_mesh(const void* mesh) {
     impl_->set_mesh(static_cast<const Mesh*>(mesh));
 }
 
+void Renderer::set_pipeline(uint32_t index) {
+    impl_->set_pipeline(index);
+}
+
 void Renderer::set_texture(const void* texture) {
     impl_->set_texture(static_cast<const Texture*>(texture));
 }
@@ -103,7 +107,7 @@ bool RendererImpl::init(const RendererConfig& config) {
         return false;
     if (!create_render_pass())
         return false;
-    if (!create_graphics_pipeline())
+    if (!create_graphics_pipelines())
         return false;
     if (!create_framebuffers())
         return false;
@@ -138,6 +142,7 @@ void RendererImpl::shutdown() {
     // Mesh and texture are owned by ResourceManager — not destroyed here.
 
     destroy_swapchain();
+    vkDestroyPipeline(device_, debug_normal_pipeline_, nullptr);
     vkDestroyPipeline(device_, graphics_pipeline_, nullptr);
     vkDestroyPipelineLayout(device_, pipeline_layout_, nullptr);
     vkDestroyDescriptorSetLayout(device_, descriptor_set_layout_, nullptr);
@@ -197,12 +202,10 @@ bool RendererImpl::begin_frame() {
 
     vkCmdBeginRenderPass(cmd, &rp_info, VK_SUBPASS_CONTENTS_INLINE);
 
-    // Per-frame state that doesn't change between draws: pipeline,
-    // viewport, scissor, descriptor sets. Per-mesh state (vertex
-    // and index buffer binds) lives in draw() so the game can
-    // render different meshes within one frame by calling
-    // set_mesh() between draw() calls.
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline_);
+    // Per-frame state that doesn't change between draws: viewport,
+    // scissor, descriptor sets. Per-mesh state (vertex/index binds)
+    // and per-draw state (pipeline) live in draw() so the game can
+    // alternate set_mesh() / set_pipeline() / draw() within a frame.
 
     VkViewport viewport{};
     viewport.x = 0.0f;
@@ -235,6 +238,12 @@ void RendererImpl::draw() {
     }
 
     VkCommandBuffer cmd = command_buffers_[current_frame_];
+
+    // Pick which pipeline this draw uses. set_pipeline() validates
+    // the index; this just maps it to the corresponding VkPipeline.
+    VkPipeline pipeline =
+        active_pipeline_index_ == 1 ? debug_normal_pipeline_ : graphics_pipeline_;
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 
     // Per-mesh state. Cheap on Vulkan; the driver fast-paths
     // re-binding the same buffer pointers between draws.
@@ -346,6 +355,13 @@ void RendererImpl::set_view_projection(const Mat4& view_projection) {
 
 void RendererImpl::set_model_matrix(const Mat4& model) {
     model_ = model;
+}
+
+void RendererImpl::set_pipeline(uint32_t index) {
+    // 0 = textured (default), 1 = debug-normal viz. Out-of-range
+    // values clamp to 0 instead of asserting - draw() always has a
+    // sensible fallback.
+    active_pipeline_index_ = (index <= 1) ? index : 0;
 }
 
 }  // namespace kuma

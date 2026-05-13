@@ -63,6 +63,12 @@ public:
     void set_texture(const void* texture);
     void set_mesh(const void* mesh);
 
+    // Pick which graphics pipeline subsequent draw() calls use.
+    // 0 = textured (default), 1 = debug-normal visualizer (renders
+    // the vertex normal as RGB; useful for checking mesh data
+    // without a real material). Out-of-range values fall back to 0.
+    void set_pipeline(uint32_t index);
+
     // Set the active camera matrix for subsequent frames. Call once
     // per frame after camera movement, before kuma::end_frame().
     void set_view_projection(const Mat4& view_projection);

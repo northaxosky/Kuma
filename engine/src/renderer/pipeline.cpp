@@ -44,22 +44,40 @@ VkShaderModule RendererImpl::create_shader_module(const std::vector<char>& code)
     return shader_module;
 }
 
-// ── Graphics Pipeline ───────────────────────────────────────────
+// ── Graphics Pipelines ──────────────────────────────────────────
+// Two pipelines share everything except shaders:
+//   pipeline 0 = textured quad shader (samples sampler2D)
+//   pipeline 1 = debug-normal viz shader (no texture sample)
+// Same vertex layout, same descriptor set layout, same push constant
+// range. The pipeline LAYOUT is shared; only the shader-stage modules
+// and the resulting VkPipeline differ.
 
-bool RendererImpl::create_graphics_pipeline() {
-    auto vert_code = read_binary_file(platform::exe_relative("shaders/quad.vert.spv").c_str());
-    auto frag_code = read_binary_file(platform::exe_relative("shaders/quad.frag.spv").c_str());
+bool RendererImpl::create_graphics_pipelines() {
+    graphics_pipeline_ = build_pipeline("shaders/quad.vert.spv", "shaders/quad.frag.spv");
+    if (graphics_pipeline_ == VK_NULL_HANDLE) return false;
+
+    debug_normal_pipeline_ =
+        build_pipeline("shaders/debug_normal.vert.spv", "shaders/debug_normal.frag.spv");
+    if (debug_normal_pipeline_ == VK_NULL_HANDLE) return false;
+
+    kuma::log::info("Graphics pipelines created (textured + debug normal)");
+    return true;
+}
+
+VkPipeline RendererImpl::build_pipeline(const char* vert_spv, const char* frag_spv) {
+    auto vert_code = read_binary_file(platform::exe_relative(vert_spv).c_str());
+    auto frag_code = read_binary_file(platform::exe_relative(frag_spv).c_str());
 
     if (vert_code.empty() || frag_code.empty()) {
-        kuma::log::error("Failed to load shader files");
-        return false;
+        kuma::log::error("Failed to load shader files: %s / %s", vert_spv, frag_spv);
+        return VK_NULL_HANDLE;
     }
 
     VkShaderModule vert_module = create_shader_module(vert_code);
     VkShaderModule frag_module = create_shader_module(frag_code);
 
     if (vert_module == VK_NULL_HANDLE || frag_module == VK_NULL_HANDLE) {
-        return false;
+        return VK_NULL_HANDLE;
     }
 
     // Shader stages
@@ -156,46 +174,56 @@ bool RendererImpl::create_graphics_pipeline() {
     color_blending.attachmentCount = 1;
     color_blending.pAttachments = &blend_attachment;
 
-    // Descriptor set layout + Pipeline layout
-    VkDescriptorSetLayoutBinding sampler_binding{};
-    sampler_binding.binding = 0;
-    sampler_binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    sampler_binding.descriptorCount = 1;
-    sampler_binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    // Descriptor set layout + pipeline layout - both pipelines share
+    // the same layout (combined-image-sampler at set 0 binding 0,
+    // mat4 push constant in vertex stage). The debug-normal pipeline
+    // doesn't actually sample the texture, but the layout is harmless
+    // and lets us reuse the descriptor set bind in begin_frame.
+    if (descriptor_set_layout_ == VK_NULL_HANDLE) {
+        VkDescriptorSetLayoutBinding sampler_binding{};
+        sampler_binding.binding = 0;
+        sampler_binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        sampler_binding.descriptorCount = 1;
+        sampler_binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-    VkDescriptorSetLayoutCreateInfo layout_binding_info{};
-    layout_binding_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layout_binding_info.bindingCount = 1;
-    layout_binding_info.pBindings = &sampler_binding;
+        VkDescriptorSetLayoutCreateInfo layout_binding_info{};
+        layout_binding_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layout_binding_info.bindingCount = 1;
+        layout_binding_info.pBindings = &sampler_binding;
 
-    if (vkCreateDescriptorSetLayout(device_, &layout_binding_info, nullptr,
-                                    &descriptor_set_layout_) != VK_SUCCESS) {
-        kuma::log::error("Failed to create descriptor set layout");
-        vkDestroyShaderModule(device_, vert_module, nullptr);
-        vkDestroyShaderModule(device_, frag_module, nullptr);
-        return false;
+        if (vkCreateDescriptorSetLayout(device_, &layout_binding_info, nullptr,
+                                        &descriptor_set_layout_) != VK_SUCCESS) {
+            kuma::log::error("Failed to create descriptor set layout");
+            vkDestroyShaderModule(device_, vert_module, nullptr);
+            vkDestroyShaderModule(device_, frag_module, nullptr);
+            return VK_NULL_HANDLE;
+        }
     }
 
-    // Push constant range: 64 bytes (one mat4) accessible from vertex shader
-    VkPushConstantRange push_range{};
-    push_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-    push_range.offset = 0;
-    push_range.size = sizeof(float) * 16;  // mat4 = 16 floats = 64 bytes
+    if (pipeline_layout_ == VK_NULL_HANDLE) {
+        // Push constant range: 64 bytes (one mat4) accessible from vertex shader
+        VkPushConstantRange push_range{};
+        push_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        push_range.offset = 0;
+        push_range.size = sizeof(float) * 16;  // mat4 = 16 floats = 64 bytes
 
-    VkPipelineLayoutCreateInfo layout_info{};
-    layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    layout_info.setLayoutCount = 1;
-    layout_info.pSetLayouts = &descriptor_set_layout_;
-    layout_info.pushConstantRangeCount = 1;
-    layout_info.pPushConstantRanges = &push_range;
+        VkPipelineLayoutCreateInfo layout_info{};
+        layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        layout_info.setLayoutCount = 1;
+        layout_info.pSetLayouts = &descriptor_set_layout_;
+        layout_info.pushConstantRangeCount = 1;
+        layout_info.pPushConstantRanges = &push_range;
 
-    VkResult result = vkCreatePipelineLayout(device_, &layout_info, nullptr, &pipeline_layout_);
-    if (result != VK_SUCCESS) {
-        kuma::log::error("Failed to create pipeline layout");
-        vkDestroyShaderModule(device_, vert_module, nullptr);
-        vkDestroyShaderModule(device_, frag_module, nullptr);
-        return false;
+        if (vkCreatePipelineLayout(device_, &layout_info, nullptr, &pipeline_layout_)
+            != VK_SUCCESS) {
+            kuma::log::error("Failed to create pipeline layout");
+            vkDestroyShaderModule(device_, vert_module, nullptr);
+            vkDestroyShaderModule(device_, frag_module, nullptr);
+            return VK_NULL_HANDLE;
+        }
     }
+
+    VkResult result = VK_SUCCESS;
 
     // Create the pipeline
     VkGraphicsPipelineCreateInfo pipeline_info{};
@@ -214,19 +242,19 @@ bool RendererImpl::create_graphics_pipeline() {
     pipeline_info.renderPass = render_pass_;
     pipeline_info.subpass = 0;
 
+    VkPipeline pipeline = VK_NULL_HANDLE;
     result = vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &pipeline_info, nullptr,
-                                       &graphics_pipeline_);
+                                       &pipeline);
 
     vkDestroyShaderModule(device_, vert_module, nullptr);
     vkDestroyShaderModule(device_, frag_module, nullptr);
 
     if (result != VK_SUCCESS) {
-        kuma::log::error("Failed to create graphics pipeline (error %d)", result);
-        return false;
+        kuma::log::error("Failed to create pipeline (%s / %s, error %d)", vert_spv, frag_spv,
+                         result);
+        return VK_NULL_HANDLE;
     }
-
-    kuma::log::info("Graphics pipeline created");
-    return true;
+    return pipeline;
 }
 
 }  // namespace kuma
