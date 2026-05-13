@@ -31,6 +31,7 @@ add_executable(kuma-tests
     transform_test.cpp
     integration/asset_format_test.cpp
     integration/asset_pipeline_test.cpp
+    integration/physics_simulation_test.cpp
 )
 
 target_link_libraries(kuma-tests PRIVATE
