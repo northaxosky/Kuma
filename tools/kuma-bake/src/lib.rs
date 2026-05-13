@@ -6,9 +6,11 @@
 
 pub mod error;
 pub mod format;
+pub mod gltf;
 pub mod mesh;
 pub mod texture;
 
 pub use error::BakeError;
+pub use gltf::bake_gltf;
 pub use mesh::bake_mesh;
 pub use texture::bake_texture;

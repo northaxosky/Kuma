@@ -22,6 +22,8 @@ enum Command {
     Mesh { input: PathBuf, output: PathBuf },
     /// Convert a PNG/JPEG/TGA image into a .ktex binary (RGBA8)
     Tex { input: PathBuf, output: PathBuf },
+    /// Convert a glTF / GLB mesh into a .kmesh binary
+    Gltf { input: PathBuf, output: PathBuf },
 }
 
 fn main() -> ExitCode {
@@ -30,6 +32,7 @@ fn main() -> ExitCode {
     let result: Result<(), kuma_bake::BakeError> = match cli.command {
         Command::Mesh { input, output } => kuma_bake::bake_mesh(&input, &output),
         Command::Tex  { input, output } => kuma_bake::bake_texture(&input, &output),
+        Command::Gltf { input, output } => kuma_bake::bake_gltf(&input, &output),
     };
 
     match result {

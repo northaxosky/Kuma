@@ -50,3 +50,16 @@ function(kuma_bake_texture INPUT_IMG)
     set_property(GLOBAL APPEND PROPERTY KUMA_BAKED_FILES ${OUTPUT})
     set(KUMA_BAKED_${BASE} ${OUTPUT} PARENT_SCOPE)
 endfunction()
+
+function(kuma_bake_gltf INPUT_GLTF)
+    get_filename_component(BASE ${INPUT_GLTF} NAME_WE)
+    set(OUTPUT ${CMAKE_BINARY_DIR}/assets/models/${BASE}.kmesh)
+    add_custom_command(
+        OUTPUT ${OUTPUT}
+        COMMAND ${KUMA_BAKE_EXE} gltf ${INPUT_GLTF} ${OUTPUT}
+        DEPENDS ${INPUT_GLTF} kuma-bake-build
+        COMMENT "Baking glTF: ${BASE} -> ${BASE}.kmesh"
+    )
+    set_property(GLOBAL APPEND PROPERTY KUMA_BAKED_FILES ${OUTPUT})
+    set(KUMA_BAKED_${BASE} ${OUTPUT} PARENT_SCOPE)
+endfunction()
