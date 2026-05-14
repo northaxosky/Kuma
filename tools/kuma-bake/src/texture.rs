@@ -15,7 +15,14 @@ use std::path::Path;
 /// directories of `output` if they don't exist.
 pub fn bake_texture(input: &Path, output: &Path) -> Result<(), BakeError> {
     let bytes: Vec<u8> = fs::read(input).map_err(|e| BakeError::io(input, e))?;
-    let img: image::DynamicImage = image::load_from_memory(&bytes)?;
+    bake_texture_from_memory(&bytes, output)
+}
+
+/// Bake an in-memory image (any format the `image` crate decodes)
+/// into a `.ktex` at `output`. Used by the scene baker for textures
+/// embedded inside .glb files where there's no on-disk source path.
+pub fn bake_texture_from_memory(bytes: &[u8], output: &Path) -> Result<(), BakeError> {
+    let img: image::DynamicImage = image::load_from_memory(bytes)?;
     let rgba: image::RgbaImage = img.to_rgba8();
 
     let header: KTexHeader = KTexHeader {

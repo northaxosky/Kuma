@@ -25,6 +25,7 @@ use crate::format::{
     KSCENE_VERSION, MAGIC_KSCENE,
 };
 use crate::gltf::{extract_primitive_local, mat4_mul};
+use crate::materials::bake_materials;
 
 const IDENTITY: [[f32; 4]; 4] = [
     [1.0, 0.0, 0.0, 0.0],
@@ -45,8 +46,9 @@ struct PrimitiveKey {
 
 #[derive(Debug)]
 struct PendingNode {
-    mesh_index: u32,             // index into the unique-mesh table
-    transform:  [[f32; 4]; 4],   // world-space, column-major
+    mesh_index:     u32,             // index into the unique-mesh table
+    material_index: u32,             // KSCENE_NO_MATERIAL when primitive lacks one
+    transform:      [[f32; 4]; 4],   // world-space, column-major
 }
 
 /// Bake a multi-mesh glTF / GLB scene into .kscene + sibling
@@ -91,11 +93,31 @@ pub fn bake_scene(input: &Path, output: &Path) -> Result<(), BakeError> {
             "output path '{}' has no usable file stem",
             output.display()
         )))?;
-    let mesh_dir_name: String = format!("{kscene_basename}-meshes");
-    let mesh_dir_abs: PathBuf = output
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join(&mesh_dir_name);
+    let mesh_dir_name:      String  = format!("{kscene_basename}-meshes");
+    let materials_dir_name: String  = format!("{kscene_basename}-materials");
+    let textures_dir_name:  String  = format!("{kscene_basename}-textures");
+    let scene_dir: &Path = output.parent().unwrap_or_else(|| Path::new("."));
+    let mesh_dir_abs:      PathBuf = scene_dir.join(&mesh_dir_name);
+    let materials_dir_abs: PathBuf = scene_dir.join(&materials_dir_name);
+    let textures_dir_abs:  PathBuf = scene_dir.join(&textures_dir_name);
+
+    // Materials extraction runs BEFORE the geometry walk so each
+    // PendingNode can stamp its primitive's material_index using the
+    // glTF material index directly. The bake writes diffuse .ktex
+    // files into the textures dir and one .kmaterial per glTF
+    // material into the materials dir. Returns relative paths in
+    // glTF-material-index order, ready to drop into the .kscene's
+    // material table.
+    let materials_out = bake_materials(
+        &document,
+        &buffers,
+        input,
+        &materials_dir_name,
+        &materials_dir_abs,
+        &textures_dir_name,
+        &textures_dir_abs,
+    )?;
+    let material_paths: Vec<String> = materials_out.paths;
 
     // Walk + dedup state.
     let mut prim_to_index: HashMap<PrimitiveKey, u32> = HashMap::new();
@@ -132,7 +154,7 @@ pub fn bake_scene(input: &Path, output: &Path) -> Result<(), BakeError> {
         );
     }
 
-    write_kscene(output, &mesh_paths, &nodes)
+    write_kscene(output, &mesh_paths, &material_paths, &nodes)
 }
 
 // Load every buffer referenced by the document. Mirrors what
@@ -285,8 +307,13 @@ fn walk_node(
             };
 
             nodes.push(PendingNode {
-                mesh_index: unique_idx,
-                transform:  world,
+                mesh_index:     unique_idx,
+                material_index: primitive
+                    .material()
+                    .index()
+                    .map(|i| i as u32)
+                    .unwrap_or(KSCENE_NO_MATERIAL),
+                transform:      world,
             });
         }
     } else if node.children().count() == 0 {
@@ -315,19 +342,21 @@ fn walk_node(
 // table), then node table (72 bytes per entry, world transform),
 // then a packed string table containing every mesh path back-to-back.
 //
-// v2 also reserves space for a material table between the mesh table
-// and the node table. The current bake leaves it empty (material_count
-// == 0) and stamps every node's material_index with KSCENE_NO_MATERIAL,
-// so the runtime falls back to the default white material. A later
-// pass (the materials commit's bake side) populates it.
+// v2 stamps each node with both a mesh_index and a material_index.
+// material_count + material_table_offset reserve space for a string-
+// table-backed material entry list, sized identically to the mesh
+// table (each entry is just an offset+length pair into the same
+// string table). Empty material_paths produces a zero-sized material
+// table - safely parsed by the runtime, falls back to defaults.
 fn write_kscene(
     output: &Path,
     mesh_paths: &[String],
+    material_paths: &[String],
     nodes: &[PendingNode],
 ) -> Result<(), BakeError> {
     let header_size = std::mem::size_of::<KSceneHeader>() as u32;
     let mesh_count:     u32 = mesh_paths.len() as u32;
-    let material_count: u32 = 0;  // populated by the materials bake pass
+    let material_count: u32 = material_paths.len() as u32;
     let node_count:     u32 = nodes.len() as u32;
 
     let mesh_table_offset:     u32 = header_size;
@@ -338,23 +367,28 @@ fn write_kscene(
     let node_table_size:       u32 = node_count * std::mem::size_of::<KSceneNodeEntry>() as u32;
     let string_table_offset:   u32 = node_table_offset + node_table_size;
 
-    // Build mesh entries + string table simultaneously: each path
-    // gets concatenated into a single buffer with its offset and
-    // length recorded into the corresponding mesh entry.
+    // Build entries + string table simultaneously: each path gets
+    // appended to the shared buffer with its offset and length
+    // recorded in the corresponding entry.
     let mut string_table: Vec<u8> = Vec::new();
     let mut mesh_entries: Vec<KSceneMeshEntry> = Vec::with_capacity(mesh_paths.len());
     for path in mesh_paths {
         let bytes = path.as_bytes();
-        let entry = KSceneMeshEntry {
+        mesh_entries.push(KSceneMeshEntry {
             path_offset: string_table.len() as u32,
             path_length: bytes.len() as u32,
-        };
-        mesh_entries.push(entry);
+        });
         string_table.extend_from_slice(bytes);
     }
-
-    // Material table is empty in this bake pass.
-    let material_entries: Vec<KSceneMeshEntry> = Vec::new();
+    let mut material_entries: Vec<KSceneMeshEntry> = Vec::with_capacity(material_paths.len());
+    for path in material_paths {
+        let bytes = path.as_bytes();
+        material_entries.push(KSceneMeshEntry {
+            path_offset: string_table.len() as u32,
+            path_length: bytes.len() as u32,
+        });
+        string_table.extend_from_slice(bytes);
+    }
 
     let string_table_size: u32 = string_table.len() as u32;
 
@@ -372,7 +406,7 @@ fn write_kscene(
         }
         node_entries.push(KSceneNodeEntry {
             mesh_index:     n.mesh_index,
-            material_index: KSCENE_NO_MATERIAL,
+            material_index: n.material_index,
             transform:      t,
         });
     }

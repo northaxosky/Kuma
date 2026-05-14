@@ -7,6 +7,7 @@
 pub mod error;
 pub mod format;
 pub mod gltf;
+pub mod materials;
 pub mod mesh;
 pub mod scene;
 pub mod sound;
@@ -17,4 +18,4 @@ pub use gltf::bake_gltf;
 pub use mesh::bake_mesh;
 pub use scene::bake_scene;
 pub use sound::{bake_sound, bake_sound_passthrough, bake_sound_pcm};
-pub use texture::bake_texture;
+pub use texture::{bake_texture, bake_texture_from_memory};
