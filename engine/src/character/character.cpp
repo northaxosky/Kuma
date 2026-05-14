@@ -408,8 +408,18 @@ void step_one(Registry& registry, float step) {
         character.on_steep =
             ground_state == JPH::CharacterBase::EGroundState::OnSteepGround;
 
-        const JPH::Vec3 new_v = rec->character->GetLinearVelocity();
-        character.velocity = from_vec3(new_v);
+        // CharacterVirtual::Update does not clamp the input velocity
+        // even when the move was blocked by the ground - GetLinearVelocity
+        // returns whatever we last SetLinearVelocity'd. Without this clamp
+        // the gravity term we add each step accumulates into a phantom
+        // downward velocity that grows without bound while the character
+        // visually rests on the floor.
+        JPH::Vec3 post_v = rec->character->GetLinearVelocity();
+        if (character.on_ground && post_v.GetY() < 0.0f) {
+            post_v = JPH::Vec3(post_v.GetX(), 0.0f, post_v.GetZ());
+            rec->character->SetLinearVelocity(post_v);
+        }
+        character.velocity = from_vec3(post_v);
 
         transform.set_position(from_rvec3(rec->character->GetPosition()));
         transform.set_rotation(yaw_to_quat(character.yaw_radians));
