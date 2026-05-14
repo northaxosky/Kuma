@@ -3,6 +3,7 @@
 // Kuma Engine — main include header
 // Game code only needs: #include <kuma/kuma.h>
 
+#include <kuma/audio.h>
 #include <kuma/camera.h>
 #include <kuma/character.h>
 #include <kuma/debug.h>

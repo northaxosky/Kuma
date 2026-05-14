@@ -86,4 +86,51 @@ ParseResult parse_ktex_header(const void* data, size_t size, KTexHeader& out_hea
     return ParseResult::Ok;
 }
 
+ParseResult parse_ksound_header(const void* data, size_t size, KSoundHeader& out_header) {
+    if (size < sizeof(KSoundHeader)) return ParseResult::TooSmall;
+
+    std::memcpy(&out_header, data, sizeof(out_header));
+
+    if (out_header.magic != kMagicKSound) return ParseResult::BadMagic;
+    if (out_header.version != kKSoundVersion) return ParseResult::VersionMismatch;
+    if (out_header.format > kAudioFormatMaxKnown) {
+        return ParseResult::UnsupportedFormat;
+    }
+    if (out_header.sample_rate == 0) return ParseResult::BadSampleRate;
+    if (out_header.channels != 1 && out_header.channels != 2) {
+        return ParseResult::BadChannels;
+    }
+
+    const bool is_pcm = (out_header.format == kAudioFormatPcmF32);
+    if (is_pcm) {
+        // PCM must declare its frame count and the payload must
+        // be exactly frame_count * channels * sizeof(float).
+        if (out_header.frame_count == 0) return ParseResult::BadFrameCount;
+        if (would_overflow(out_header.frame_count, out_header.channels)) {
+            return ParseResult::PayloadOverflow;
+        }
+        const size_t samples =
+            static_cast<size_t>(out_header.frame_count) * out_header.channels;
+        if (would_overflow(samples, sizeof(float))) {
+            return ParseResult::PayloadOverflow;
+        }
+        const size_t expected_bytes = samples * sizeof(float);
+        if (expected_bytes != out_header.payload_size) {
+            return ParseResult::PayloadSizeMismatch;
+        }
+    } else {
+        // Compressed payloads carry the original encoded bytes; the
+        // backend's decoder figures out frame count at load time.
+        // Insisting on frame_count == 0 keeps the format unambiguous.
+        if (out_header.frame_count != 0) return ParseResult::BadFrameCount;
+    }
+
+    if (out_header.payload_offset > size ||
+        out_header.payload_size > size - out_header.payload_offset) {
+        return ParseResult::OffsetOutOfBounds;
+    }
+
+    return ParseResult::Ok;
+}
+
 }  // namespace kuma::asset_format

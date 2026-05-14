@@ -134,7 +134,7 @@ struct Mat4 {
     //   x: -1 (left) to +1 (right)
     //   y: -1 (top)  to +1 (bottom)   ← Vulkan Y is flipped vs OpenGL
     //   z:  0 (near) to  1 (far)      ← Vulkan depth range is 0..1
-    static Mat4 perspective(float fov_radians, float aspect, float near, float far) {
+    static Mat4 perspective(float fov_radians, float aspect, float near_plane, float far_plane) {
         float tan_half_fov = std::tan(fov_radians / 2.0f);
 
         // Right-handed, looking down -Z. Objects in front of the camera
@@ -143,8 +143,8 @@ struct Mat4 {
         Mat4 m{};
         m(0, 0) = 1.0f / (aspect * tan_half_fov);
         m(1, 1) = -1.0f / tan_half_fov;  // flip Y for Vulkan
-        m(2, 2) = far / (near - far);    // maps z to 0..1 (reversed for -Z)
-        m(2, 3) = (far * near) / (near - far);
+        m(2, 2) = far_plane / (near_plane - far_plane);    // maps z to 0..1 (reversed for -Z)
+        m(2, 3) = (far_plane * near_plane) / (near_plane - far_plane);
         m(3, 2) = -1.0f;  // w_clip = -z_view (positive for -Z)
         return m;
     }

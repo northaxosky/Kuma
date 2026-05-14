@@ -108,6 +108,24 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(JoltPhysics)
 
+# ── miniaudio ─────────────────────────────────────────────────────
+# Single-header C audio library: device, mixer, decoders (WAV/MP3/
+# OGG/FLAC), 3D spatialization. We pull the whole repo via
+# FetchContent for tag pinning, but only consume miniaudio.h - one
+# .cpp in the engine #defines MA_IMPLEMENTATION before including.
+FetchContent_Declare(
+    miniaudio
+    GIT_REPOSITORY https://github.com/mackron/miniaudio.git
+    GIT_TAG        0.11.25
+    GIT_SHALLOW    TRUE
+)
+FetchContent_GetProperties(miniaudio)
+if(NOT miniaudio_POPULATED)
+    FetchContent_Populate(miniaudio)
+endif()
+add_library(miniaudio INTERFACE)
+target_include_directories(miniaudio INTERFACE ${miniaudio_SOURCE_DIR})
+
 # ── Sub-projects ─────────────────────────────────────────────────
 add_subdirectory(engine)
 add_subdirectory(tools/kuma-bake)

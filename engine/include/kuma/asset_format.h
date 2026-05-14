@@ -16,14 +16,30 @@ namespace kuma::asset_format {
 
 // ── Magic codes (4 ASCII bytes, little-endian u32 in code) ──────
 // Hex dump of a valid .kmesh starts with `4B 4D 53 48` ('KMSH').
-inline constexpr uint32_t kMagicKMesh = 0x48534D4B;  // 'KMSH'
-inline constexpr uint32_t kMagicKTex  = 0x5845544B;  // 'KTEX'
+inline constexpr uint32_t kMagicKMesh  = 0x48534D4B;  // 'KMSH'
+inline constexpr uint32_t kMagicKTex   = 0x5845544B;  // 'KTEX'
+inline constexpr uint32_t kMagicKSound = 0x444E534B;  // 'KSND'
 
-inline constexpr uint32_t kKMeshVersion = 1;
-inline constexpr uint32_t kKTexVersion  = 1;
+inline constexpr uint32_t kKMeshVersion  = 1;
+inline constexpr uint32_t kKTexVersion   = 1;
+inline constexpr uint32_t kKSoundVersion = 1;
 
 // ── Texture pixel formats ───────────────────────────────────────
 inline constexpr uint32_t kFormatRGBA8 = 1;
+
+// ── Audio payload formats ───────────────────────────────────────
+// PcmF32 = the payload is raw IEEE-754 float32 samples, little
+// endian, interleaved frame-major (mono = M M M, stereo = L R L R),
+// frame_count = sample_count, payload_size = frame_count * channels * 4.
+//
+// Compressed formats store the original encoded bytes (passthrough).
+// frame_count is 0 because the engine doesn't pre-compute it; it
+// hands the bytes to the audio backend's decoder at load time.
+inline constexpr uint32_t kAudioFormatPcmF32 = 0;
+inline constexpr uint32_t kAudioFormatOgg    = 1;
+inline constexpr uint32_t kAudioFormatMp3    = 2;
+inline constexpr uint32_t kAudioFormatFlac   = 3;
+inline constexpr uint32_t kAudioFormatMaxKnown = kAudioFormatFlac;
 
 // ── Vertex (matches engine's Vulkan vertex input) ───────────────
 struct Vertex {
@@ -60,7 +76,24 @@ struct KTexHeader {
 static_assert(sizeof(KTexHeader) == 32,
               "KTexHeader layout must match tools/kuma-bake/src/format.rs");
 
-// ── Pure parsers (no Vulkan, no I/O) ────────────────────────────
+// ── KSound header ───────────────────────────────────────────────
+// PCM payloads: little-endian f32, interleaved frame-major.
+// Compressed payloads (OGG/MP3/FLAC): original encoded bytes,
+// frame_count == 0 (the audio backend computes it lazily at load).
+struct KSoundHeader {
+    uint32_t magic;
+    uint32_t version;
+    uint32_t format;         // see kAudioFormat* constants
+    uint32_t sample_rate;    // hz
+    uint32_t channels;       // 1 (mono) or 2 (stereo)
+    uint32_t frame_count;    // frames per channel for PCM, 0 for compressed
+    uint32_t payload_offset; // byte offset of first payload byte
+    uint32_t payload_size;   // payload byte count
+};
+static_assert(sizeof(KSoundHeader) == 32,
+              "KSoundHeader layout must match tools/kuma-bake/src/format.rs");
+
+// ── Pure parsers (no I/O, no third-party libs) ──────────────────
 // Validate the header + slice layout of an in-memory .kmesh /
 // .ktex blob. Engine loaders call these before doing any GPU
 // upload; integration tests drive them with hand-crafted byte
@@ -77,13 +110,18 @@ enum class ParseResult {
     TooSmall,           // buffer < sizeof(header)
     BadMagic,           // first 4 bytes != expected magic
     VersionMismatch,    // version field != current version
-    UnsupportedFormat,  // (KTex only) format field not in known set
-    OffsetOutOfBounds,  // vertex/index/pixel slice extends past buffer
-    OffsetOverlap,      // vertex slice overlaps with index slice
+    UnsupportedFormat,  // (KTex / KSound) format field not in known set
+    OffsetOutOfBounds,  // payload slice extends past buffer
+    OffsetOverlap,      // (KMesh) vertex slice overlaps with index slice
     PayloadOverflow,    // count * sizeof(elem) overflows or exceeds buffer
+    BadSampleRate,      // (KSound) sample_rate == 0
+    BadChannels,        // (KSound) channels != 1 and != 2
+    BadFrameCount,      // (KSound) PCM frame_count == 0 OR compressed frame_count != 0
+    PayloadSizeMismatch,// (KSound) PCM payload_size != frame_count * channels * 4
 };
 
 ParseResult parse_kmesh_header(const void* data, size_t size, KMeshHeader& out_header);
 ParseResult parse_ktex_header(const void* data, size_t size, KTexHeader& out_header);
+ParseResult parse_ksound_header(const void* data, size_t size, KSoundHeader& out_header);
 
 }  // namespace kuma::asset_format

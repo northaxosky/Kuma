@@ -17,6 +17,7 @@ target_sources(kuma-engine PRIVATE
     src/physics/physics.cpp
     src/character/character.cpp
     src/character/fps_camera.cpp
+    src/audio/audio.cpp
     src/platform/input.cpp
     src/platform/paths.cpp
     src/platform/window.cpp
@@ -37,11 +38,12 @@ target_include_directories(kuma-engine
 
 # SDL3 — PRIVATE because game code should never use SDL directly
 # Jolt — PRIVATE because public physics.h exposes only opaque types
+# miniaudio — PRIVATE single-header library, public audio.h only opaque
 # ImGui — PUBLIC because game code calls ImGui::* directly when
 # building custom debug panels (immediate-mode philosophy: no engine
 # wrapper around ImGui's already-well-designed API).
 target_link_libraries(kuma-engine
-    PRIVATE SDL3::SDL3 Vulkan::Vulkan Jolt
+    PRIVATE SDL3::SDL3 Vulkan::Vulkan Jolt miniaudio
     PUBLIC  imgui
 )
 
