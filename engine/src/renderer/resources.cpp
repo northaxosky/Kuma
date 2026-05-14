@@ -111,58 +111,237 @@ void RendererImpl::copy_buffer_to_image(VkBuffer buffer, VkImage image, uint32_t
 
 // ── Texture (now loaded by ResourceManager) ────────────────────
 
-// ── Descriptor Sets ────────────────────────────────────────────
+// ── Default Textures ───────────────────────────────────────────
+// 1x1 RGBA fallbacks bound when a material doesn't supply a slot.
+// Default values match the glTF 2.0 spec so a "default everything"
+// material reproduces the spec's neutral PBR behavior:
+//   diffuse  = white            -> base color factor passes through
+//   normal   = (0.5, 0.5, 1.0)  -> tangent-space "no perturbation"
+//   MR       = (0, 1, 0, 0)     -> roughness=1, metallic=0 packed in GB
+//   occlusion= white            -> no AO darkening
+//   emissive = black            -> emissive factor passes through
+//
+// Stored as RGBA8_UNORM. The lit shader will eventually multiply by
+// the material factors; the current diffuse-only shader just samples
+// the diffuse texture directly so the white default cleanly produces
+// "untextured material renders white".
 
-bool RendererImpl::create_descriptor_sets() {
+bool RendererImpl::upload_pixels_to_texture(const void* pixels, uint32_t width, uint32_t height,
+                                            VkFormat format, Texture& out_texture) {
+    const VkDeviceSize image_size = static_cast<VkDeviceSize>(width) * height * 4;
+
+    // Staging buffer in host-visible memory.
+    VkBuffer staging_buffer = VK_NULL_HANDLE;
+    VkDeviceMemory staging_memory = VK_NULL_HANDLE;
+    VkBufferCreateInfo buf_info{};
+    buf_info.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buf_info.size        = image_size;
+    buf_info.usage       = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    buf_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    if (vkCreateBuffer(device_, &buf_info, nullptr, &staging_buffer) != VK_SUCCESS) {
+        return false;
+    }
+
+    VkMemoryRequirements buf_reqs{};
+    vkGetBufferMemoryRequirements(device_, staging_buffer, &buf_reqs);
+    VkMemoryAllocateInfo buf_alloc{};
+    buf_alloc.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    buf_alloc.allocationSize  = buf_reqs.size;
+    buf_alloc.memoryTypeIndex = find_memory_type(
+        buf_reqs.memoryTypeBits,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    if (vkAllocateMemory(device_, &buf_alloc, nullptr, &staging_memory) != VK_SUCCESS) {
+        vkDestroyBuffer(device_, staging_buffer, nullptr);
+        return false;
+    }
+    vkBindBufferMemory(device_, staging_buffer, staging_memory, 0);
+
+    void* mapped = nullptr;
+    vkMapMemory(device_, staging_memory, 0, image_size, 0, &mapped);
+    std::memcpy(mapped, pixels, static_cast<size_t>(image_size));
+    vkUnmapMemory(device_, staging_memory);
+
+    // Device-local image.
+    VkImageCreateInfo img_info{};
+    img_info.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    img_info.imageType     = VK_IMAGE_TYPE_2D;
+    img_info.extent.width  = width;
+    img_info.extent.height = height;
+    img_info.extent.depth  = 1;
+    img_info.mipLevels     = 1;
+    img_info.arrayLayers   = 1;
+    img_info.format        = format;
+    img_info.tiling        = VK_IMAGE_TILING_OPTIMAL;
+    img_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    img_info.usage         = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    img_info.samples       = VK_SAMPLE_COUNT_1_BIT;
+    img_info.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
+    if (vkCreateImage(device_, &img_info, nullptr, &out_texture.image) != VK_SUCCESS) {
+        vkDestroyBuffer(device_, staging_buffer, nullptr);
+        vkFreeMemory(device_, staging_memory, nullptr);
+        return false;
+    }
+
+    VkMemoryRequirements img_reqs{};
+    vkGetImageMemoryRequirements(device_, out_texture.image, &img_reqs);
+    VkMemoryAllocateInfo img_alloc{};
+    img_alloc.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    img_alloc.allocationSize  = img_reqs.size;
+    img_alloc.memoryTypeIndex =
+        find_memory_type(img_reqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (vkAllocateMemory(device_, &img_alloc, nullptr, &out_texture.memory) != VK_SUCCESS) {
+        vkDestroyImage(device_, out_texture.image, nullptr);
+        vkDestroyBuffer(device_, staging_buffer, nullptr);
+        vkFreeMemory(device_, staging_memory, nullptr);
+        return false;
+    }
+    vkBindImageMemory(device_, out_texture.image, out_texture.memory, 0);
+
+    transition_image_layout(out_texture.image, VK_IMAGE_LAYOUT_UNDEFINED,
+                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    copy_buffer_to_image(staging_buffer, out_texture.image, width, height);
+    transition_image_layout(out_texture.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+    vkDestroyBuffer(device_, staging_buffer, nullptr);
+    vkFreeMemory(device_, staging_memory, nullptr);
+
+    VkImageViewCreateInfo view_info{};
+    view_info.sType                           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    view_info.image                           = out_texture.image;
+    view_info.viewType                        = VK_IMAGE_VIEW_TYPE_2D;
+    view_info.format                          = format;
+    view_info.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+    view_info.subresourceRange.baseMipLevel   = 0;
+    view_info.subresourceRange.levelCount     = 1;
+    view_info.subresourceRange.baseArrayLayer = 0;
+    view_info.subresourceRange.layerCount     = 1;
+    if (vkCreateImageView(device_, &view_info, nullptr, &out_texture.view) != VK_SUCCESS) {
+        return false;
+    }
+
+    VkSamplerCreateInfo sampler_info{};
+    sampler_info.sType        = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    sampler_info.magFilter    = VK_FILTER_NEAREST;  // 1x1 defaults; no filtering needed
+    sampler_info.minFilter    = VK_FILTER_NEAREST;
+    sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampler_info.borderColor  = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+    sampler_info.mipmapMode   = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    if (vkCreateSampler(device_, &sampler_info, nullptr, &out_texture.sampler) != VK_SUCCESS) {
+        return false;
+    }
+
+    out_texture.width  = width;
+    out_texture.height = height;
+    return true;
+}
+
+bool RendererImpl::create_default_textures() {
+    struct Default { VkFormat format; uint8_t pixel[4]; const char* name; };
+    const Default defaults[5] = {
+        {VK_FORMAT_R8G8B8A8_SRGB,  {255, 255, 255, 255}, "diffuse"},
+        {VK_FORMAT_R8G8B8A8_UNORM, {128, 128, 255, 255}, "normal"},
+        {VK_FORMAT_R8G8B8A8_UNORM, {  0, 255,   0, 255}, "metallic-roughness"},
+        {VK_FORMAT_R8G8B8A8_UNORM, {255, 255, 255, 255}, "occlusion"},
+        {VK_FORMAT_R8G8B8A8_SRGB,  {  0,   0,   0, 255}, "emissive"},
+    };
+    for (uint32_t i = 0; i < default_textures_.size(); ++i) {
+        if (!upload_pixels_to_texture(defaults[i].pixel, 1, 1, defaults[i].format,
+                                      default_textures_[i])) {
+            kuma::log::error("Failed to create default %s texture", defaults[i].name);
+            return false;
+        }
+    }
+    kuma::log::info("Default material textures created");
+    return true;
+}
+
+// ── Material Descriptor Pool ───────────────────────────────────
+// One descriptor set per loaded material, all immutable after
+// allocation. Pool capacity is the max materials a scene can hold;
+// 256 covers Sponza (~25 materials) with plenty of headroom for
+// stress-test scenes. When scenes start needing more, this becomes
+// the place to grow the pool or switch to bindless (followups.md).
+
+bool RendererImpl::create_material_descriptor_pool() {
+    constexpr uint32_t kMaxMaterials = 256;
+    constexpr uint32_t kBindingsPerMaterial = 5;
+
     VkDescriptorPoolSize pool_size{};
-    pool_size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    pool_size.descriptorCount = MAX_FRAMES_IN_FLIGHT;
+    pool_size.type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    pool_size.descriptorCount = kMaxMaterials * kBindingsPerMaterial;
 
     VkDescriptorPoolCreateInfo pool_info{};
-    pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    pool_info.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     pool_info.poolSizeCount = 1;
-    pool_info.pPoolSizes = &pool_size;
-    pool_info.maxSets = MAX_FRAMES_IN_FLIGHT;
+    pool_info.pPoolSizes    = &pool_size;
+    pool_info.maxSets       = kMaxMaterials;
 
-    if (vkCreateDescriptorPool(device_, &pool_info, nullptr, &descriptor_pool_) != VK_SUCCESS) {
-        kuma::log::error("Failed to create descriptor pool");
+    if (vkCreateDescriptorPool(device_, &pool_info, nullptr, &material_pool_) != VK_SUCCESS) {
+        kuma::log::error("Failed to create material descriptor pool");
         return false;
     }
-
-    std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, descriptor_set_layout_);
-
-    VkDescriptorSetAllocateInfo set_alloc_info{};
-    set_alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    set_alloc_info.descriptorPool = descriptor_pool_;
-    set_alloc_info.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
-    set_alloc_info.pSetLayouts = layouts.data();
-
-    descriptor_sets_.resize(MAX_FRAMES_IN_FLIGHT);
-    if (vkAllocateDescriptorSets(device_, &set_alloc_info, descriptor_sets_.data()) != VK_SUCCESS) {
-        kuma::log::error("Failed to allocate descriptor sets");
-        return false;
-    }
-
-    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        VkDescriptorImageInfo image_info{};
-        image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        image_info.imageView = texture_->view;
-        image_info.sampler = texture_->sampler;
-
-        VkWriteDescriptorSet write{};
-        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        write.dstSet = descriptor_sets_[i];
-        write.dstBinding = 0;
-        write.dstArrayElement = 0;
-        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        write.descriptorCount = 1;
-        write.pImageInfo = &image_info;
-
-        vkUpdateDescriptorSets(device_, 1, &write, 0, nullptr);
-    }
-
-    kuma::log::info("Descriptor sets created");
     return true;
+}
+
+VkDescriptorSet RendererImpl::allocate_material_descriptor_set(const Texture* slots[5]) {
+    VkDescriptorSetAllocateInfo alloc_info{};
+    alloc_info.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    alloc_info.descriptorPool     = material_pool_;
+    alloc_info.descriptorSetCount = 1;
+    alloc_info.pSetLayouts        = &descriptor_set_layout_;
+
+    VkDescriptorSet set = VK_NULL_HANDLE;
+    VkResult result = vkAllocateDescriptorSets(device_, &alloc_info, &set);
+    if (result != VK_SUCCESS) {
+        kuma::log::error("Material descriptor pool exhausted (allocated %u sets)",
+                         materials_allocated_);
+        return VK_NULL_HANDLE;
+    }
+    ++materials_allocated_;
+
+    std::array<VkDescriptorImageInfo, 5> image_infos{};
+    std::array<VkWriteDescriptorSet, 5>  writes{};
+    for (uint32_t i = 0; i < 5; ++i) {
+        const Texture* tex = (slots[i] != nullptr) ? slots[i] : &default_textures_[i];
+        image_infos[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        image_infos[i].imageView   = tex->view;
+        image_infos[i].sampler     = tex->sampler;
+
+        writes[i].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[i].dstSet          = set;
+        writes[i].dstBinding      = i;
+        writes[i].dstArrayElement = 0;
+        writes[i].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        writes[i].descriptorCount = 1;
+        writes[i].pImageInfo      = &image_infos[i];
+    }
+    vkUpdateDescriptorSets(device_, static_cast<uint32_t>(writes.size()), writes.data(),
+                           0, nullptr);
+    return set;
+}
+
+void RendererImpl::destroy_material_resources() {
+    // Pool destruction frees every set allocated from it; the legacy
+    // texture-to-set cache just borrows raw VkDescriptorSet handles
+    // so clearing the map is enough on the C++ side.
+    texture_to_material_set_.clear();
+    if (material_pool_ != VK_NULL_HANDLE) {
+        vkDestroyDescriptorPool(device_, material_pool_, nullptr);
+        material_pool_ = VK_NULL_HANDLE;
+    }
+    for (auto& tex : default_textures_) {
+        if (tex.sampler != VK_NULL_HANDLE) vkDestroySampler(device_, tex.sampler, nullptr);
+        if (tex.view    != VK_NULL_HANDLE) vkDestroyImageView(device_, tex.view, nullptr);
+        if (tex.image   != VK_NULL_HANDLE) {
+            vkDestroyImage(device_, tex.image, nullptr);
+            vkFreeMemory(device_, tex.memory, nullptr);
+        }
+        tex = Texture{};
+    }
+    materials_allocated_ = 0;
 }
 
 // ── Command Pool + Buffers ──────────────────────────────────────

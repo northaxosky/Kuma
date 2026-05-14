@@ -16,6 +16,7 @@
 #include <cstring>
 #include <fstream>
 #include <limits>
+#include <unordered_map>
 #include <vector>
 #include <vulkan/vulkan.h>
 
@@ -135,10 +136,15 @@ private:
     VkShaderModule create_shader_module(const std::vector<char>& code) const;
 
     // ── resources.cpp ───────────────────────────────────────────
-    bool create_descriptor_sets();
+    bool create_default_textures();
+    bool create_material_descriptor_pool();
+    void destroy_material_resources();
+    VkDescriptorSet allocate_material_descriptor_set(const Texture* slots[5]);
     bool create_command_pool();
     bool create_command_buffers();
     bool create_sync_objects();
+    bool upload_pixels_to_texture(const void* pixels, uint32_t width, uint32_t height,
+                                  VkFormat format, Texture& out_texture);
     void copy_buffer_to_image(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
     void transition_image_layout(VkImage image, VkImageLayout old_layout, VkImageLayout new_layout);
     VkCommandBuffer begin_single_command() const;
@@ -198,10 +204,30 @@ private:
     // that don't care about transforms still get sensible behavior.
     Mat4 model_ = Mat4::identity();
 
-    // Descriptors
-    VkDescriptorSetLayout descriptor_set_layout_ = VK_NULL_HANDLE;
-    VkDescriptorPool descriptor_pool_ = VK_NULL_HANDLE;
-    std::vector<VkDescriptorSet> descriptor_sets_;
+    // Descriptors. The pool sources one immutable descriptor set per
+    // material at material-load time; sets are read-only for the GPU
+    // and safe to reuse across frames in flight without per-frame
+    // copies. A small cache maps borrowed Texture pointers to the
+    // single-texture material set the legacy set_texture path uses
+    // until game code switches to the Material API.
+    VkDescriptorSetLayout descriptor_set_layout_  = VK_NULL_HANDLE;
+    VkDescriptorPool      material_pool_          = VK_NULL_HANDLE;
+    uint32_t              materials_allocated_    = 0;
+
+    // Default 1x1 textures bound when a material doesn't supply a
+    // particular slot. Indexed by binding (0=diffuse..4=emissive).
+    // Owned by the renderer so they exist before any user material.
+    std::array<Texture, 5> default_textures_{};
+
+    // Per-texture material set cache for the legacy single-texture
+    // path. set_texture(t) becomes "find or create the material that
+    // uses t as diffuse and the renderer defaults for everything else".
+    // Replaced by a real per-Material descriptor set in the next commit.
+    std::unordered_map<const Texture*, VkDescriptorSet> texture_to_material_set_;
+
+    // Currently-bound material descriptor set. draw() binds this; if
+    // null, the draw is skipped.
+    VkDescriptorSet active_material_set_ = VK_NULL_HANDLE;
 
     // Commands
     VkCommandPool command_pool_ = VK_NULL_HANDLE;

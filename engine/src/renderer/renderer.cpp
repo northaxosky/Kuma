@@ -117,6 +117,10 @@ bool RendererImpl::init(const RendererConfig& config) {
         return false;
     if (!create_sync_objects())
         return false;
+    if (!create_default_textures())
+        return false;
+    if (!create_material_descriptor_pool())
+        return false;
 
     kuma::log::info("Vulkan renderer initialized");
     return true;
@@ -135,9 +139,7 @@ void RendererImpl::shutdown() {
 
     vkDestroyCommandPool(device_, command_pool_, nullptr);
 
-    if (descriptor_pool_ != VK_NULL_HANDLE) {
-        vkDestroyDescriptorPool(device_, descriptor_pool_, nullptr);
-    }
+    destroy_material_resources();
 
     // Mesh and texture are owned by ResourceManager — not destroyed here.
 
@@ -221,8 +223,9 @@ bool RendererImpl::begin_frame() {
     scissor.extent = swapchain_extent_;
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout_, 0, 1,
-                            &descriptor_sets_[current_frame_], 0, nullptr);
+    // Descriptor sets are bound per-draw now (one set per material),
+    // so begin_frame intentionally does NOT bind one. draw() picks
+    // the active material set when there's geometry to render.
 
     frame_recording_ = true;
     return true;
@@ -244,6 +247,14 @@ void RendererImpl::draw() {
     VkPipeline pipeline =
         active_pipeline_index_ == 1 ? debug_normal_pipeline_ : graphics_pipeline_;
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+
+    // Bind the active material's descriptor set (5 sampler bindings).
+    // The debug-normal pipeline ignores the textures but still needs
+    // a valid set bound because the layout declares the bindings.
+    if (active_material_set_ != VK_NULL_HANDLE) {
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout_, 0, 1,
+                                &active_material_set_, 0, nullptr);
+    }
 
     // Per-mesh state. Cheap on Vulkan; the driver fast-paths
     // re-binding the same buffer pointers between draws.
@@ -336,16 +347,27 @@ void RendererImpl::set_mesh(const Mesh* mesh) {
 
 void RendererImpl::set_texture(const Texture* texture) {
     texture_ = texture;
-
-    // Recreate descriptor sets to point at the new texture
-    if (descriptor_pool_ != VK_NULL_HANDLE) {
-        vkDestroyDescriptorPool(device_, descriptor_pool_, nullptr);
-        descriptor_pool_ = VK_NULL_HANDLE;
+    if (texture == nullptr) {
+        active_material_set_ = VK_NULL_HANDLE;
+        return;
     }
 
-    if (texture_ != nullptr) {
-        create_descriptor_sets();
+    // Single-texture compatibility shim: build a one-off material
+    // descriptor set that uses this texture as diffuse and the
+    // renderer's defaults for the other four slots. Cached so the
+    // common case of binding the same texture every frame allocates
+    // exactly one descriptor set per unique texture.
+    auto it = texture_to_material_set_.find(texture);
+    if (it == texture_to_material_set_.end()) {
+        const Texture* slots[5] = {texture, nullptr, nullptr, nullptr, nullptr};
+        VkDescriptorSet set = allocate_material_descriptor_set(slots);
+        if (set == VK_NULL_HANDLE) {
+            active_material_set_ = VK_NULL_HANDLE;
+            return;
+        }
+        it = texture_to_material_set_.emplace(texture, set).first;
     }
+    active_material_set_ = it->second;
 }
 
 void RendererImpl::set_view_projection(const Mat4& view_projection) {

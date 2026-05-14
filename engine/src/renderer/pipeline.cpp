@@ -175,21 +175,26 @@ VkPipeline RendererImpl::build_pipeline(const char* vert_spv, const char* frag_s
     color_blending.pAttachments = &blend_attachment;
 
     // Descriptor set layout + pipeline layout - both pipelines share
-    // the same layout (combined-image-sampler at set 0 binding 0,
-    // mat4 push constant in vertex stage). The debug-normal pipeline
-    // doesn't actually sample the texture, but the layout is harmless
-    // and lets us reuse the descriptor set bind in begin_frame.
+    // the same layout (5 combined-image-samplers at set 0 bindings 0..4,
+    // mat4 push constant in vertex stage). Five bindings is the full
+    // set of slots a glTF PBR material can supply (diffuse, normal,
+    // metallic-roughness, occlusion, emissive); the current quad
+    // shader only samples diffuse and the debug-normal pipeline reads
+    // none of them, but having a stable layout means new shaders can
+    // start sampling the other slots without touching the C++ side.
     if (descriptor_set_layout_ == VK_NULL_HANDLE) {
-        VkDescriptorSetLayoutBinding sampler_binding{};
-        sampler_binding.binding = 0;
-        sampler_binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        sampler_binding.descriptorCount = 1;
-        sampler_binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        std::array<VkDescriptorSetLayoutBinding, 5> sampler_bindings{};
+        for (uint32_t i = 0; i < sampler_bindings.size(); ++i) {
+            sampler_bindings[i].binding         = i;
+            sampler_bindings[i].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            sampler_bindings[i].descriptorCount = 1;
+            sampler_bindings[i].stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT;
+        }
 
         VkDescriptorSetLayoutCreateInfo layout_binding_info{};
-        layout_binding_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        layout_binding_info.bindingCount = 1;
-        layout_binding_info.pBindings = &sampler_binding;
+        layout_binding_info.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layout_binding_info.bindingCount = static_cast<uint32_t>(sampler_bindings.size());
+        layout_binding_info.pBindings    = sampler_bindings.data();
 
         if (vkCreateDescriptorSetLayout(device_, &layout_binding_info, nullptr,
                                         &descriptor_set_layout_) != VK_SUCCESS) {
