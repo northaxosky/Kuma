@@ -215,9 +215,7 @@ private:
     // Descriptors. The pool sources one immutable descriptor set per
     // material at material-load time; sets are read-only for the GPU
     // and safe to reuse across frames in flight without per-frame
-    // copies. A small cache maps borrowed Texture pointers to the
-    // single-texture material set the legacy set_texture path uses
-    // until game code switches to the Material API.
+    // copies.
     VkDescriptorSetLayout descriptor_set_layout_  = VK_NULL_HANDLE;
     VkDescriptorPool      material_pool_          = VK_NULL_HANDLE;
     uint32_t              materials_allocated_    = 0;
@@ -227,11 +225,13 @@ private:
     // Owned by the renderer so they exist before any user material.
     std::array<Texture, 5> default_textures_{};
 
-    // Per-texture material set cache for the legacy single-texture
-    // path. set_texture(t) becomes "find or create the material that
-    // uses t as diffuse and the renderer defaults for everything else".
-    // Replaced by a real per-Material descriptor set in the next commit.
-    std::unordered_map<const Texture*, VkDescriptorSet> texture_to_material_set_;
+    // Single-slot helper for the legacy set_texture compatibility
+    // shim. Each set_texture call frees this and allocates a new
+    // descriptor set wrapping the requested texture as diffuse, so
+    // repeated calls don't leak pool capacity. The shim exists for
+    // the engine's boot-time texture binding; new code uses
+    // set_material with a Material loaded from ResourceManager.
+    VkDescriptorSet boot_texture_set_ = VK_NULL_HANDLE;
 
     // Currently-bound material descriptor set. draw() binds this; if
     // null, the draw is skipped.

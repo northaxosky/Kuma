@@ -366,27 +366,31 @@ void RendererImpl::set_mesh(const Mesh* mesh) {
 
 void RendererImpl::set_texture(const Texture* texture) {
     texture_ = texture;
+
+    // Free any previously-allocated boot descriptor set so repeated
+    // set_texture calls don't leak pool capacity, and so we never
+    // hand back a stale set if a Texture* gets reused after the
+    // upstream cache evicts and re-inserts the same address (a real
+    // hazard once scene unload or hot-reload lands).
+    if (boot_texture_set_ != VK_NULL_HANDLE) {
+        if (active_material_set_ == boot_texture_set_) {
+            active_material_set_ = VK_NULL_HANDLE;
+        }
+        vkFreeDescriptorSets(device_, material_pool_, 1, &boot_texture_set_);
+        boot_texture_set_ = VK_NULL_HANDLE;
+        if (materials_allocated_ > 0) --materials_allocated_;
+    }
+
     if (texture == nullptr) {
         active_material_set_ = VK_NULL_HANDLE;
         return;
     }
 
-    // Single-texture compatibility shim: build a one-off material
-    // descriptor set that uses this texture as diffuse and the
-    // renderer's defaults for the other four slots. Cached so the
-    // common case of binding the same texture every frame allocates
-    // exactly one descriptor set per unique texture.
-    auto it = texture_to_material_set_.find(texture);
-    if (it == texture_to_material_set_.end()) {
-        const Texture* slots[5] = {texture, nullptr, nullptr, nullptr, nullptr};
-        VkDescriptorSet set = allocate_material_descriptor_set(slots);
-        if (set == VK_NULL_HANDLE) {
-            active_material_set_ = VK_NULL_HANDLE;
-            return;
-        }
-        it = texture_to_material_set_.emplace(texture, set).first;
-    }
-    active_material_set_ = it->second;
+    // Wrap the texture in a one-off material descriptor set, using
+    // the renderer's defaults for the other four slots.
+    const Texture* slots[5] = {texture, nullptr, nullptr, nullptr, nullptr};
+    boot_texture_set_ = allocate_material_descriptor_set(slots);
+    active_material_set_ = boot_texture_set_;
 }
 
 void RendererImpl::set_material(const Material* material) {

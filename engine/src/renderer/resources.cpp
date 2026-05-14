@@ -329,10 +329,12 @@ VkDescriptorSet RendererImpl::allocate_material_descriptor_set(const Texture* sl
 }
 
 void RendererImpl::destroy_material_resources() {
-    // Pool destruction frees every set allocated from it; the legacy
-    // texture-to-set cache just borrows raw VkDescriptorSet handles
-    // so clearing the map is enough on the C++ side.
-    texture_to_material_set_.clear();
+    // Pool destruction frees every set allocated from it (including
+    // the boot texture set, if one is still live), so individual
+    // freeing here would be redundant. Just mark our handle null
+    // before tearing down the pool to avoid a dangling reference.
+    boot_texture_set_ = VK_NULL_HANDLE;
+    active_material_set_ = VK_NULL_HANDLE;
     if (material_pool_ != VK_NULL_HANDLE) {
         vkDestroyDescriptorPool(device_, material_pool_, nullptr);
         material_pool_ = VK_NULL_HANDLE;
