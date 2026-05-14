@@ -25,6 +25,7 @@ add_executable(kuma-tests
     camera_test.cpp
     debug_test.cpp
     ecs_test.cpp
+    fps_camera_test.cpp
     input_test.cpp
     physics_test.cpp
     time_test.cpp
