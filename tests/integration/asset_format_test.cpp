@@ -16,15 +16,21 @@
 #include <vector>
 
 using kuma::asset_format::KMeshHeader;
+using kuma::asset_format::KSoundHeader;
 using kuma::asset_format::KTexHeader;
 using kuma::asset_format::ParseResult;
 using kuma::asset_format::Vertex;
+using kuma::asset_format::kAudioFormatOgg;
+using kuma::asset_format::kAudioFormatPcmF32;
 using kuma::asset_format::kFormatRGBA8;
 using kuma::asset_format::kKMeshVersion;
+using kuma::asset_format::kKSoundVersion;
 using kuma::asset_format::kKTexVersion;
 using kuma::asset_format::kMagicKMesh;
+using kuma::asset_format::kMagicKSound;
 using kuma::asset_format::kMagicKTex;
 using kuma::asset_format::parse_kmesh_header;
+using kuma::asset_format::parse_ksound_header;
 using kuma::asset_format::parse_ktex_header;
 
 namespace {
@@ -214,4 +220,142 @@ TEST(IntegrationAssetFormatKTex, OverflowingDimensionsReportsPayloadOverflow) {
     EXPECT_TRUE(pr == ParseResult::PayloadOverflow ||
                 pr == ParseResult::OffsetOutOfBounds)
         << "got " << static_cast<int>(pr);
+}
+
+// ── KSound test helpers ─────────────────────────────────────────
+
+namespace {
+std::vector<char> make_valid_ksound_pcm_bytes(uint32_t frames, uint32_t channels) {
+    const size_t header_size = sizeof(KSoundHeader);
+    const size_t payload_bytes = static_cast<size_t>(frames) * channels * sizeof(float);
+
+    std::vector<char> bytes(header_size + payload_bytes, 0);
+    KSoundHeader hdr{};
+    hdr.magic          = kMagicKSound;
+    hdr.version        = kKSoundVersion;
+    hdr.format         = kAudioFormatPcmF32;
+    hdr.sample_rate    = 44100;
+    hdr.channels       = channels;
+    hdr.frame_count    = frames;
+    hdr.payload_offset = static_cast<uint32_t>(header_size);
+    hdr.payload_size   = static_cast<uint32_t>(payload_bytes);
+    std::memcpy(bytes.data(), &hdr, sizeof(hdr));
+    return bytes;
+}
+
+std::vector<char> make_valid_ksound_ogg_bytes(uint32_t payload_bytes) {
+    const size_t header_size = sizeof(KSoundHeader);
+    std::vector<char> bytes(header_size + payload_bytes, 0);
+    KSoundHeader hdr{};
+    hdr.magic          = kMagicKSound;
+    hdr.version        = kKSoundVersion;
+    hdr.format         = kAudioFormatOgg;
+    hdr.sample_rate    = 48000;
+    hdr.channels       = 2;
+    hdr.frame_count    = 0;  // compressed: backend computes at load
+    hdr.payload_offset = static_cast<uint32_t>(header_size);
+    hdr.payload_size   = payload_bytes;
+    std::memcpy(bytes.data(), &hdr, sizeof(hdr));
+    return bytes;
+}
+}  // namespace
+
+// ── KSound corruption matrix ────────────────────────────────────
+
+TEST(IntegrationAssetFormatKSound, ValidPcmBytesParseOk) {
+    const auto bytes = make_valid_ksound_pcm_bytes(100, 2);
+    KSoundHeader hdr{};
+    EXPECT_EQ(parse_ksound_header(bytes.data(), bytes.size(), hdr), ParseResult::Ok);
+    EXPECT_EQ(hdr.sample_rate, 44100u);
+    EXPECT_EQ(hdr.channels, 2u);
+    EXPECT_EQ(hdr.frame_count, 100u);
+}
+
+TEST(IntegrationAssetFormatKSound, ValidOggBytesParseOk) {
+    const auto bytes = make_valid_ksound_ogg_bytes(8192);
+    KSoundHeader hdr{};
+    EXPECT_EQ(parse_ksound_header(bytes.data(), bytes.size(), hdr), ParseResult::Ok);
+    EXPECT_EQ(hdr.format, kAudioFormatOgg);
+    EXPECT_EQ(hdr.frame_count, 0u);
+}
+
+TEST(IntegrationAssetFormatKSound, EmptyBufferReportsTooSmall) {
+    KSoundHeader hdr{};
+    EXPECT_EQ(parse_ksound_header(nullptr, 0, hdr), ParseResult::TooSmall);
+}
+
+TEST(IntegrationAssetFormatKSound, BadMagicReportsBadMagic) {
+    auto bytes = make_valid_ksound_pcm_bytes(10, 1);
+    KSoundHeader hdr{};
+    std::memcpy(&hdr, bytes.data(), sizeof(hdr));
+    hdr.magic = 0xDEADBEEF;
+    std::memcpy(bytes.data(), &hdr, sizeof(hdr));
+    EXPECT_EQ(parse_ksound_header(bytes.data(), bytes.size(), hdr), ParseResult::BadMagic);
+}
+
+TEST(IntegrationAssetFormatKSound, WrongVersionReportsVersionMismatch) {
+    auto bytes = make_valid_ksound_pcm_bytes(10, 1);
+    KSoundHeader hdr{};
+    std::memcpy(&hdr, bytes.data(), sizeof(hdr));
+    hdr.version = 99;
+    std::memcpy(bytes.data(), &hdr, sizeof(hdr));
+    EXPECT_EQ(parse_ksound_header(bytes.data(), bytes.size(), hdr), ParseResult::VersionMismatch);
+}
+
+TEST(IntegrationAssetFormatKSound, UnknownFormatReportsUnsupportedFormat) {
+    auto bytes = make_valid_ksound_pcm_bytes(10, 1);
+    KSoundHeader hdr{};
+    std::memcpy(&hdr, bytes.data(), sizeof(hdr));
+    hdr.format = 99;
+    std::memcpy(bytes.data(), &hdr, sizeof(hdr));
+    EXPECT_EQ(parse_ksound_header(bytes.data(), bytes.size(), hdr), ParseResult::UnsupportedFormat);
+}
+
+TEST(IntegrationAssetFormatKSound, ZeroSampleRateReportsBadSampleRate) {
+    auto bytes = make_valid_ksound_pcm_bytes(10, 1);
+    KSoundHeader hdr{};
+    std::memcpy(&hdr, bytes.data(), sizeof(hdr));
+    hdr.sample_rate = 0;
+    std::memcpy(bytes.data(), &hdr, sizeof(hdr));
+    EXPECT_EQ(parse_ksound_header(bytes.data(), bytes.size(), hdr), ParseResult::BadSampleRate);
+}
+
+TEST(IntegrationAssetFormatKSound, FiveChannelsReportsBadChannels) {
+    auto bytes = make_valid_ksound_pcm_bytes(10, 1);
+    KSoundHeader hdr{};
+    std::memcpy(&hdr, bytes.data(), sizeof(hdr));
+    hdr.channels = 5;
+    std::memcpy(bytes.data(), &hdr, sizeof(hdr));
+    EXPECT_EQ(parse_ksound_header(bytes.data(), bytes.size(), hdr), ParseResult::BadChannels);
+}
+
+TEST(IntegrationAssetFormatKSound, PcmZeroFrameCountReportsBadFrameCount) {
+    auto bytes = make_valid_ksound_pcm_bytes(0, 1);  // PCM with 0 frames
+    KSoundHeader hdr{};
+    EXPECT_EQ(parse_ksound_header(bytes.data(), bytes.size(), hdr), ParseResult::BadFrameCount);
+}
+
+TEST(IntegrationAssetFormatKSound, OggNonZeroFrameCountReportsBadFrameCount) {
+    auto bytes = make_valid_ksound_ogg_bytes(8192);
+    KSoundHeader hdr{};
+    std::memcpy(&hdr, bytes.data(), sizeof(hdr));
+    hdr.frame_count = 1234;  // compressed must be 0
+    std::memcpy(bytes.data(), &hdr, sizeof(hdr));
+    EXPECT_EQ(parse_ksound_header(bytes.data(), bytes.size(), hdr), ParseResult::BadFrameCount);
+}
+
+TEST(IntegrationAssetFormatKSound, MismatchedPayloadSizeReportsMismatch) {
+    auto bytes = make_valid_ksound_pcm_bytes(10, 2);
+    KSoundHeader hdr{};
+    std::memcpy(&hdr, bytes.data(), sizeof(hdr));
+    hdr.payload_size = 999;  // doesn't match 10 frames * 2 channels * 4 bytes
+    std::memcpy(bytes.data(), &hdr, sizeof(hdr));
+    EXPECT_EQ(parse_ksound_header(bytes.data(), bytes.size(), hdr), ParseResult::PayloadSizeMismatch);
+}
+
+TEST(IntegrationAssetFormatKSound, TruncatedPayloadReportsOffsetOutOfBounds) {
+    auto bytes = make_valid_ksound_pcm_bytes(100, 2);
+    bytes.resize(sizeof(KSoundHeader) + 10);  // chop almost all the payload
+    KSoundHeader hdr{};
+    EXPECT_EQ(parse_ksound_header(bytes.data(), bytes.size(), hdr), ParseResult::OffsetOutOfBounds);
 }

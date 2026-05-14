@@ -1,7 +1,6 @@
 // Real implementation: drives miniaudio's ma_engine for the device,
 // mixer, and 3D spatializer; manages a cache of loaded Sounds keyed
 // by path; tracks playing instances with generation-checked handles.
-// AudioSource component sync + simulate live in the next commit.
 
 #define MA_IMPLEMENTATION
 #include <miniaudio.h>
@@ -9,7 +8,6 @@
 #include <kuma/audio.h>
 
 #include <algorithm>
-#include <cstring>
 #include <fstream>
 #include <memory>
 #include <string>
@@ -24,33 +22,35 @@ namespace kuma::audio {
 
 // ── Public opaque types - real definitions live here ────────────
 
-// Loaded sound data. Owns its payload bytes for the lifetime of
-// the audio module, so the ma_audio_buffer / ma_decoder we construct
-// from those bytes always reads from valid memory. Template_sound
-// is the "factory" that ma_sound_init_copy clones for each playback
-// instance; it never plays itself.
+// Loaded sound data. Owns the .ksound payload bytes + parsed header
+// metadata for the lifetime of the audio module. Each playing
+// instance constructs its OWN data source (ma_audio_buffer_ref for
+// PCM, ma_decoder for compressed) referencing these shared bytes -
+// sharing a single data source across instances doesn't work
+// because miniaudio data sources are stateful (independent read
+// cursors per playback).
 struct Sound {
     std::string path;
     std::vector<std::byte> payload;
+    asset_format::KSoundHeader header{};
     bool is_pcm = false;
-
-    ma_audio_buffer audio_buffer{};
-    ma_decoder decoder{};
-    ma_sound template_sound{};
-
-    bool audio_buffer_inited = false;
-    bool decoder_inited = false;
-    bool template_inited = false;
 };
 
 namespace {
 
 // ── Per-instance backend record ─────────────────────────────────
+// Each playing sound owns its own data source so multiple instances
+// of the same Sound can run concurrently with independent positions
+// and read cursors.
 struct InstanceRecord {
     ma_sound sound{};
-    bool in_use = false;
+    ma_audio_buffer_ref pcm_ref{};
+    ma_decoder decoder{};
     bool sound_inited = false;
-    uint32_t generation = 1;  // bump on free; matches handle.generation
+    bool pcm_ref_inited = false;
+    bool decoder_inited = false;
+    bool in_use = false;
+    uint32_t generation = 1;  // bumped on free; matches handle.generation
 };
 
 // ── Module state ────────────────────────────────────────────────
@@ -60,8 +60,8 @@ struct State {
 
     // Path-keyed cache so load_sound("foo.ksound") returns the same
     // Sound* across calls. Sounds live until shutdown - never unloaded
-    // mid-run because that would dangle ma_audio_buffer / ma_decoder
-    // pointers held by playing instances.
+    // mid-run because that would dangle bytes referenced by playing
+    // instances' data sources.
     std::unordered_map<std::string, std::unique_ptr<Sound>> sound_cache;
 
     // Packed instance records. play_sound / play_sound_at pull from
@@ -79,83 +79,6 @@ struct State {
 
 State* g_state = nullptr;
 
-inline ma_vec3f to_ma_vec3(const Vec3& v) { return ma_vec3f{v.x, v.y, v.z}; }
-
-// ── Sound loading ───────────────────────────────────────────────
-
-bool load_pcm(Sound* sound, const asset_format::KSoundHeader& header) {
-    const uint8_t* payload_start = reinterpret_cast<const uint8_t*>(sound->payload.data())
-                                    + header.payload_offset;
-
-    ma_audio_buffer_config cfg = ma_audio_buffer_config_init(
-        ma_format_f32,
-        header.channels,
-        header.frame_count,
-        payload_start,
-        nullptr);
-
-    if (ma_audio_buffer_init(&cfg, &sound->audio_buffer) != MA_SUCCESS) {
-        kuma::log::error("audio: ma_audio_buffer_init failed for %s", sound->path.c_str());
-        return false;
-    }
-    sound->audio_buffer_inited = true;
-
-    if (ma_sound_init_from_data_source(&g_state->engine,
-                                        &sound->audio_buffer,
-                                        /*flags=*/0,
-                                        /*group=*/nullptr,
-                                        &sound->template_sound) != MA_SUCCESS) {
-        kuma::log::error("audio: ma_sound_init_from_data_source(PCM) failed for %s",
-                          sound->path.c_str());
-        return false;
-    }
-    sound->template_inited = true;
-    return true;
-}
-
-bool load_compressed(Sound* sound, const asset_format::KSoundHeader& header) {
-    const uint8_t* payload_start = reinterpret_cast<const uint8_t*>(sound->payload.data())
-                                    + header.payload_offset;
-
-    ma_decoder_config cfg = ma_decoder_config_init(ma_format_f32, header.channels, header.sample_rate);
-
-    if (ma_decoder_init_memory(payload_start,
-                                header.payload_size,
-                                &cfg,
-                                &sound->decoder) != MA_SUCCESS) {
-        kuma::log::error("audio: ma_decoder_init_memory failed for %s", sound->path.c_str());
-        return false;
-    }
-    sound->decoder_inited = true;
-
-    if (ma_sound_init_from_data_source(&g_state->engine,
-                                        &sound->decoder,
-                                        /*flags=*/0,
-                                        /*group=*/nullptr,
-                                        &sound->template_sound) != MA_SUCCESS) {
-        kuma::log::error("audio: ma_sound_init_from_data_source(decoder) failed for %s",
-                          sound->path.c_str());
-        return false;
-    }
-    sound->template_inited = true;
-    return true;
-}
-
-void destroy_sound(Sound* sound) {
-    if (sound->template_inited) {
-        ma_sound_uninit(&sound->template_sound);
-        sound->template_inited = false;
-    }
-    if (sound->decoder_inited) {
-        ma_decoder_uninit(&sound->decoder);
-        sound->decoder_inited = false;
-    }
-    if (sound->audio_buffer_inited) {
-        ma_audio_buffer_uninit(&sound->audio_buffer);
-        sound->audio_buffer_inited = false;
-    }
-}
-
 std::vector<std::byte> read_file(const char* path) {
     std::ifstream f(path, std::ios::binary | std::ios::ate);
     if (!f) return {};
@@ -165,6 +88,75 @@ std::vector<std::byte> read_file(const char* path) {
     f.seekg(0, std::ios::beg);
     f.read(reinterpret_cast<char*>(bytes.data()), size);
     return bytes;
+}
+
+// ── Instance setup ──────────────────────────────────────────────
+// Construct the per-instance data source from the Sound's owned
+// bytes. The Sound never goes away mid-run, so the byte pointer is
+// stable for the instance's lifetime.
+bool init_instance_data_source(InstanceRecord& rec, const Sound& sound) {
+    const uint8_t* payload_start =
+        reinterpret_cast<const uint8_t*>(sound.payload.data())
+        + sound.header.payload_offset;
+
+    if (sound.is_pcm) {
+        if (ma_audio_buffer_ref_init(ma_format_f32,
+                                      sound.header.channels,
+                                      payload_start,
+                                      sound.header.frame_count,
+                                      &rec.pcm_ref) != MA_SUCCESS) {
+            return false;
+        }
+        rec.pcm_ref_inited = true;
+
+        if (ma_sound_init_from_data_source(&g_state->engine,
+                                            &rec.pcm_ref,
+                                            /*flags=*/0,
+                                            /*group=*/nullptr,
+                                            &rec.sound) != MA_SUCCESS) {
+            return false;
+        }
+        rec.sound_inited = true;
+        return true;
+    }
+
+    // Compressed: spin up a fresh decoder per instance so each one
+    // has its own decode state. They all read from the same shared
+    // payload bytes that the Sound owns.
+    ma_decoder_config cfg = ma_decoder_config_init(
+        ma_format_f32, sound.header.channels, sound.header.sample_rate);
+    if (ma_decoder_init_memory(payload_start,
+                                sound.header.payload_size,
+                                &cfg,
+                                &rec.decoder) != MA_SUCCESS) {
+        return false;
+    }
+    rec.decoder_inited = true;
+
+    if (ma_sound_init_from_data_source(&g_state->engine,
+                                        &rec.decoder,
+                                        /*flags=*/0,
+                                        /*group=*/nullptr,
+                                        &rec.sound) != MA_SUCCESS) {
+        return false;
+    }
+    rec.sound_inited = true;
+    return true;
+}
+
+void uninit_instance(InstanceRecord& rec) {
+    if (rec.sound_inited) {
+        ma_sound_uninit(&rec.sound);
+        rec.sound_inited = false;
+    }
+    if (rec.decoder_inited) {
+        ma_decoder_uninit(&rec.decoder);
+        rec.decoder_inited = false;
+    }
+    if (rec.pcm_ref_inited) {
+        ma_audio_buffer_ref_uninit(&rec.pcm_ref);
+        rec.pcm_ref_inited = false;
+    }
 }
 
 // ── Instance allocation ─────────────────────────────────────────
@@ -190,10 +182,7 @@ void free_instance(uint32_t index) {
     if (index >= g_state->instances.size()) return;
     InstanceRecord& rec = g_state->instances[index];
     if (!rec.in_use) return;
-    if (rec.sound_inited) {
-        ma_sound_uninit(&rec.sound);
-        rec.sound_inited = false;
-    }
+    uninit_instance(rec);
     rec.in_use = false;
     // Bump generation so any stale handles pointing at this slot
     // are detected as invalid by future stop_sound calls.
@@ -203,8 +192,6 @@ void free_instance(uint32_t index) {
     --g_state->live_count;
 }
 
-// Returns nullptr if the handle is stale or already freed. Used by
-// stop_sound and any future "is this handle still alive" query.
 InstanceRecord* lookup_instance(SoundHandle handle) {
     if (!handle.valid()) return nullptr;
     if (handle.index >= g_state->instances.size()) return nullptr;
@@ -244,24 +231,17 @@ void shutdown() {
     if (g_state == nullptr) return;
 
     // Strict destruction order (per the duck pass):
-    //   1. Stop + uninit every playing instance
-    //   2. Uninit every Sound's template + data source
+    //   1. Uninit every playing instance (data source then ma_sound)
+    //   2. Drop the Sound cache (just bytes; nothing miniaudio holds)
     //   3. Uninit the engine
-    // Reversing this would have miniaudio dereference freed memory.
     for (auto& rec : g_state->instances) {
-        if (rec.sound_inited) {
-            ma_sound_uninit(&rec.sound);
-            rec.sound_inited = false;
-        }
+        uninit_instance(rec);
         rec.in_use = false;
     }
     g_state->instances.clear();
     g_state->free_slots.clear();
     g_state->live_count = 0;
 
-    for (auto& kv : g_state->sound_cache) {
-        destroy_sound(kv.second.get());
-    }
     g_state->sound_cache.clear();
 
     if (g_state->engine_inited) {
@@ -280,9 +260,6 @@ const Sound* load_sound(const char* path) {
     if (g_state == nullptr) return nullptr;
     if (path == nullptr) return nullptr;
 
-    // Cache hit: return the same Sound* we returned last time so the
-    // caller can rely on pointer-equality and the underlying data
-    // stays shared across all instances.
     auto it = g_state->sound_cache.find(path);
     if (it != g_state->sound_cache.end()) {
         return it->second.get();
@@ -305,14 +282,8 @@ const Sound* load_sound(const char* path) {
     auto sound = std::make_unique<Sound>();
     sound->path = path;
     sound->payload = std::move(bytes);
+    sound->header = header;
     sound->is_pcm = (header.format == asset_format::kAudioFormatPcmF32);
-
-    const bool ok = sound->is_pcm ? load_pcm(sound.get(), header)
-                                   : load_compressed(sound.get(), header);
-    if (!ok) {
-        destroy_sound(sound.get());
-        return nullptr;
-    }
 
     Sound* raw = sound.get();
     g_state->sound_cache.emplace(path, std::move(sound));
@@ -328,24 +299,18 @@ namespace {
 
 SoundHandle play_internal(const Sound* sound, bool spatial, const Vec3& position) {
     if (g_state == nullptr || sound == nullptr) return {};
-    if (!sound->template_inited) return {};
 
     SoundHandle handle{};
     InstanceRecord* rec = allocate_instance(handle);
 
-    if (ma_sound_init_copy(&g_state->engine,
-                            const_cast<ma_sound*>(&sound->template_sound),
-                            /*flags=*/0,
-                            /*group=*/nullptr,
-                            &rec->sound) != MA_SUCCESS) {
-        kuma::log::error("audio: ma_sound_init_copy failed for %s", sound->path.c_str());
+    if (!init_instance_data_source(*rec, *sound)) {
+        kuma::log::error("audio: failed to construct data source for %s",
+                          sound->path.c_str());
         free_instance(handle.index);
         return {};
     }
-    rec->sound_inited = true;
 
-    // Force the spatialization state explicitly - the template's
-    // setting is not inherited reliably and silently-non-spatial
+    // Force the spatialization state explicitly - silently-non-spatial
     // 3D plays would be a nightmare to debug.
     ma_sound_set_spatialization_enabled(&rec->sound, spatial ? MA_TRUE : MA_FALSE);
     if (spatial) {
@@ -377,7 +342,7 @@ SoundHandle play_sound_at(const Sound* sound, const Vec3& world_position) {
 void stop_sound(SoundHandle handle) {
     if (g_state == nullptr) return;
     InstanceRecord* rec = lookup_instance(handle);
-    if (rec == nullptr) return;  // stale, already finished, or invalid - safe no-op
+    if (rec == nullptr) return;
     free_instance(handle.index);
 }
 
@@ -402,17 +367,9 @@ void set_listener_pose(const Vec3& position, const Vec3& forward, const Vec3& up
 
 namespace {
 
-// Walk every live AudioSource component:
-//   - lazy-create the playing instance the first time we see it
-//     (and start it if play_on_create is set)
-//   - sync mutable runtime state (volume, looping, spatial position)
-//     into the live ma_sound so post-create edits actually take
-//     effect; immutable params (sound, spatial) are frozen at create
-//   - flip Character.playing to reflect the current instance state
 void sync_component(EntityID entity, AudioSource& src, const Transform* transform) {
     if (g_state == nullptr) return;
 
-    // Lazy create.
     if (!src.created) {
         if (src.sound == nullptr) return;
         if (src.spatial && transform == nullptr) {
@@ -425,17 +382,12 @@ void sync_component(EntityID entity, AudioSource& src, const Transform* transfor
         SoundHandle handle{};
         InstanceRecord* rec = allocate_instance(handle);
 
-        if (ma_sound_init_copy(&g_state->engine,
-                                const_cast<ma_sound*>(&src.sound->template_sound),
-                                /*flags=*/0,
-                                /*group=*/nullptr,
-                                &rec->sound) != MA_SUCCESS) {
-            kuma::log::error("audio: ma_sound_init_copy failed for AudioSource on entity %u",
+        if (!init_instance_data_source(*rec, *src.sound)) {
+            kuma::log::error("audio: failed to construct data source for AudioSource on entity %u",
                               entity.id);
             free_instance(handle.index);
             return;
         }
-        rec->sound_inited = true;
 
         ma_sound_set_spatialization_enabled(&rec->sound, src.spatial ? MA_TRUE : MA_FALSE);
         if (src.spatial && transform != nullptr) {
@@ -460,9 +412,6 @@ void sync_component(EntityID entity, AudioSource& src, const Transform* transfor
         return;
     }
 
-    // Existing instance: sync mutable state. Looking up by handle
-    // catches the case where the instance was already pruned (sound
-    // finished naturally) - we mark playing=false and bail.
     InstanceRecord* rec = lookup_instance(src.handle);
     if (rec == nullptr) {
         src.playing = false;
@@ -479,21 +428,11 @@ void sync_component(EntityID entity, AudioSource& src, const Transform* transfor
     src.playing = ma_sound_is_playing(&rec->sound) == MA_TRUE;
 }
 
-// Drop instances whose owning entity is gone or whose AudioSource
-// component was removed. Mirrors the validate-alive sweep in physics
-// and character; matches by record entity tracking once we add it.
-// For now we have no entity-back-ref on InstanceRecord (immediate
-// play paths never had one), so the sweep iterates the registry side
-// instead and clears component handles whose entity is stale via
-// the natural lookup_instance check inside sync_component.
 }  // namespace
 
 void simulate(Registry& registry) {
     if (g_state == nullptr) return;
 
-    // Prune one-shots that finished naturally. Walk the records by
-    // index so component sync below can also work index-based and
-    // not race the iteration.
     for (uint32_t i = 0; i < g_state->instances.size(); ++i) {
         InstanceRecord& rec = g_state->instances[i];
         if (!rec.in_use) continue;
@@ -502,17 +441,13 @@ void simulate(Registry& registry) {
         }
     }
 
-    // Spatial AudioSources need a Transform; iterate that view first.
     for (auto [entity, src, transform] : registry.view<AudioSource, Transform>()) {
-        if (!src.spatial && src.created) continue;  // non-spatial: handled below
+        if (!src.spatial && src.created) continue;
         sync_component(entity, src, &transform);
     }
 
-    // Non-spatial AudioSources don't require a Transform - iterate
-    // the single-component view to pick up music / UI sources whose
-    // entities are pure-audio.
     for (auto [entity, src] : registry.view<AudioSource>()) {
-        if (src.spatial) continue;  // already handled above
+        if (src.spatial) continue;
         sync_component(entity, src, nullptr);
     }
 }
@@ -545,4 +480,3 @@ uint32_t playing_count() {
 }
 
 }  // namespace kuma::audio
-

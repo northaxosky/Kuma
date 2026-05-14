@@ -32,6 +32,7 @@ add_executable(kuma-tests
     transform_test.cpp
     integration/asset_format_test.cpp
     integration/asset_pipeline_test.cpp
+    integration/audio_test.cpp
     integration/character_simulation_test.cpp
     integration/physics_simulation_test.cpp
 )
