@@ -26,8 +26,12 @@ void FpsCameraController::update(Character& character,
                                   Transform& transform,
                                   Camera& camera) {
     // ── Mouse → yaw (character) + pitch (camera) ────────────────
+    // Mouse right (positive X delta) increases yaw, rotating the
+    // forward vector toward +X (looking right). Mouse down (positive
+    // Y delta) decreases pitch so the view tilts down. SDL's relative
+    // motion has +Y pointing down, hence the subtract on pitch.
     const Vec2 mouse = input::mouse_delta();
-    character.yaw_radians -= mouse.x * mouse_sensitivity;
+    character.yaw_radians += mouse.x * mouse_sensitivity;
     pitch_radians_ -= mouse.y * mouse_sensitivity;
     pitch_radians_ = std::clamp(pitch_radians_, -kMaxPitchRadians, kMaxPitchRadians);
 
