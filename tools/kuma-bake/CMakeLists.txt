@@ -76,3 +76,21 @@ function(kuma_bake_sound INPUT_SOUND)
     set_property(GLOBAL APPEND PROPERTY KUMA_BAKED_FILES ${OUTPUT})
     set(KUMA_BAKED_${BASE} ${OUTPUT} PARENT_SCOPE)
 endfunction()
+
+# Multi-mesh scene bake. Produces <basename>.kscene PLUS a sibling
+# <basename>-meshes/ directory full of .kmesh files. The kuma-bake
+# tool creates the meshes dir itself; CMake just needs to track the
+# .kscene as the build artifact (and let the runtime ResourceManager
+# discover the .kmesh siblings via the engine's path-relative loader).
+function(kuma_bake_scene INPUT_GLTF)
+    get_filename_component(BASE ${INPUT_GLTF} NAME_WE)
+    set(OUTPUT ${CMAKE_BINARY_DIR}/assets/scenes/${BASE}.kscene)
+    add_custom_command(
+        OUTPUT ${OUTPUT}
+        COMMAND ${KUMA_BAKE_EXE} scene ${INPUT_GLTF} ${OUTPUT}
+        DEPENDS ${INPUT_GLTF} kuma-bake-build
+        COMMENT "Baking scene: ${BASE} -> ${BASE}.kscene + ${BASE}-meshes/"
+    )
+    set_property(GLOBAL APPEND PROPERTY KUMA_BAKED_FILES ${OUTPUT})
+    set(KUMA_BAKED_${BASE} ${OUTPUT} PARENT_SCOPE)
+endfunction()

@@ -22,6 +22,133 @@ use crate::format::{Vertex, write_kmesh};
 use std::collections::HashMap;
 use std::path::Path;
 
+// Primitive geometry in local space, deduplicated and ready to
+// write to a .kmesh file. Returned by extract_primitive_local so
+// scene baking can write the same geometry once and instance it
+// many times via per-node transforms in the .kscene file.
+pub(crate) struct LocalMeshData {
+    pub vertices: Vec<Vertex>,
+    pub indices:  Vec<u16>,
+}
+
+// Walk a glTF primitive, validate Triangles mode + attribute counts,
+// dedup vertices into a u16-indexed buffer. Does NOT apply any node
+// transform - the caller is responsible for handling world space
+// (single-mesh bake_gltf bakes the transform into vertices, scene
+// bake stores the transform per-node and keeps mesh data local).
+//
+// `label` is woven into error messages so users see e.g.
+// "scene 'sponza.glb' mesh #3 primitive #1 yields >65535 vertices".
+pub(crate) fn extract_primitive_local<'a, F>(
+    primitive: &'a gltf::Primitive<'a>,
+    buffer_data: F,
+    label: &str,
+) -> Result<LocalMeshData, BakeError>
+where
+    F: Clone + Fn(gltf::Buffer<'a>) -> Option<&'a [u8]>,
+{
+    if primitive.mode() != gltf::mesh::Mode::Triangles {
+        return Err(BakeError::Invalid(format!(
+            "{label}: primitive uses mode {:?}; only Triangles is supported. \
+             Re-export with triangulation enabled.",
+            primitive.mode()
+        )));
+    }
+
+    let reader = primitive.reader(buffer_data);
+
+    let positions: Vec<[f32; 3]> = reader
+        .read_positions()
+        .ok_or_else(|| BakeError::Invalid(format!(
+            "{label}: primitive missing required POSITION attribute"
+        )))?
+        .collect();
+
+    let normals: Vec<[f32; 3]> = reader
+        .read_normals()
+        .map(|it| it.collect())
+        .unwrap_or_else(|| vec![[0.0, 1.0, 0.0]; positions.len()]);
+
+    let uvs: Vec<[f32; 2]> = reader
+        .read_tex_coords(0)
+        .map(|tc| tc.into_f32().collect())
+        .unwrap_or_else(|| vec![[0.0, 0.0]; positions.len()]);
+
+    if normals.len() != positions.len() || uvs.len() != positions.len() {
+        return Err(BakeError::Invalid(format!(
+            "{label}: vertex attribute counts mismatch (positions={}, normals={}, uvs={})",
+            positions.len(), normals.len(), uvs.len()
+        )));
+    }
+
+    let raw_indices: Vec<u32> = reader
+        .read_indices()
+        .map(|it| it.into_u32().collect())
+        .unwrap_or_else(|| (0..positions.len() as u32).collect());
+
+    if raw_indices.len() % 3 != 0 {
+        return Err(BakeError::Invalid(format!(
+            "{label}: triangle list has {} indices (not divisible by 3)",
+            raw_indices.len()
+        )));
+    }
+
+    let mut vertices: Vec<Vertex> = Vec::new();
+    let mut indices:  Vec<u16>    = Vec::new();
+    let mut dedup:    HashMap<[u32; 8], u16> = HashMap::new();
+
+    for &raw_idx in &raw_indices {
+        let i: usize = raw_idx as usize;
+        if i >= positions.len() {
+            return Err(BakeError::Invalid(format!(
+                "{label}: index {i} out of range (vertex count {})",
+                positions.len()
+            )));
+        }
+        let v: Vertex = Vertex {
+            pos:    positions[i],
+            uv:     uvs[i],
+            normal: normalize3(normals[i]),
+        };
+        let key: [u32; 8] = [
+            v.pos[0].to_bits(), v.pos[1].to_bits(), v.pos[2].to_bits(),
+            v.uv[0].to_bits(),  v.uv[1].to_bits(),
+            v.normal[0].to_bits(), v.normal[1].to_bits(), v.normal[2].to_bits(),
+        ];
+        let idx: u16 = match dedup.get(&key) {
+            Some(&existing) => existing,
+            None => {
+                let new_idx: u16 = vertices.len().try_into().map_err(|_| {
+                    BakeError::Invalid(format!(
+                        "{label}: yields more than 65535 unique vertices after dedup; \
+                         the engine's u16 indices cannot address larger meshes. Split \
+                         or simplify the mesh."
+                    ))
+                })?;
+                vertices.push(v);
+                dedup.insert(key, new_idx);
+                new_idx
+            }
+        };
+        indices.push(idx);
+    }
+
+    Ok(LocalMeshData { vertices, indices })
+}
+
+// Apply a column-major 4x4 transform to every position; the upper-
+// left 3x3 (no translation, no perspective) is applied to normals.
+// For non-uniform scale this isn't perfectly correct - the proper
+// fix is the inverse-transpose - but uniform scale is the common
+// case and the engine doesn't do lighting yet anyway.
+pub(crate) fn apply_world_transform(data: &mut LocalMeshData, world: &[[f32; 4]; 4]) {
+    let normal_mat: [[f32; 3]; 3] = upper_left_3x3(*world);
+    for v in &mut data.vertices {
+        v.pos    = transform_point(world, v.pos);
+        v.normal = normalize3(transform_dir(&normal_mat, v.normal));
+    }
+}
+
 pub fn bake_gltf(input: &Path, output: &Path) -> Result<(), BakeError> {
     // gltf::import handles .gltf vs .glb transparently. Buffers
     // (the binary blobs holding vertex data) get loaded eagerly;
@@ -39,8 +166,8 @@ pub fn bake_gltf(input: &Path, output: &Path) -> Result<(), BakeError> {
     }
     if mesh_count > 1 {
         return Err(BakeError::Invalid(format!(
-            "glTF '{}' contains {} meshes; v1 baker handles only single-mesh files. \
-             Export each object separately, or wait for multi-mesh support.",
+            "glTF '{}' contains {} meshes; the single-mesh baker handles one mesh per file. \
+             Use the 'scene' subcommand for multi-mesh files.",
             input.display(),
             mesh_count
         )));
@@ -50,9 +177,9 @@ pub fn bake_gltf(input: &Path, output: &Path) -> Result<(), BakeError> {
     let primitive_count: usize = mesh.primitives().count();
     if primitive_count > 1 {
         return Err(BakeError::Invalid(format!(
-            "glTF '{}' mesh '{}' contains {} primitives; v1 baker handles only \
-             single-primitive meshes (typically one material per object). Split \
-             the mesh by material in your DCC tool, or wait for multi-primitive support.",
+            "glTF '{}' mesh '{}' contains {} primitives; the single-mesh baker handles \
+             one primitive per file. Split by material in your DCC tool, or use the \
+             'scene' subcommand which bakes each primitive as its own .kmesh.",
             input.display(),
             mesh.name().unwrap_or("<unnamed>"),
             primitive_count
@@ -67,129 +194,18 @@ pub fn bake_gltf(input: &Path, output: &Path) -> Result<(), BakeError> {
             input.display()
         )))?;
 
-    // Triangle list is the only mode the engine renders. Without
-    // this guard, a POINTS / LINES / STRIPS / FANS primitive would
-    // silently bake into garbage indexed-triangle output.
-    if primitive.mode() != gltf::mesh::Mode::Triangles {
-        return Err(BakeError::Invalid(format!(
-            "glTF '{}' primitive uses mode {:?}; only Triangles is supported. \
-             Re-export with triangulation enabled.",
-            input.display(),
-            primitive.mode()
-        )));
-    }
-
     // Find the first scene node that references this mesh and use
     // its world-space transform. Catches the "artist moved the
     // object in Blender but didn't Apply Transforms" case so the
     // baked geometry matches the viewport. Default: identity if no
     // node references the mesh (rare; exporters always create one).
-    let node_transform: [[f32; 4]; 4] = find_mesh_node_transform(&doc, mesh.index());
-    let normal_matrix:  [[f32; 3]; 3] = upper_left_3x3(node_transform);
+    let world: [[f32; 4]; 4] = find_mesh_node_transform(&doc, mesh.index());
 
-    let reader = primitive.reader(|b| Some(&buffers[b.index()]));
+    let label: String = format!("glTF '{}'", input.display());
+    let mut data = extract_primitive_local(&primitive, |b| Some(&buffers[b.index()]), &label)?;
+    apply_world_transform(&mut data, &world);
 
-    let raw_positions: Vec<[f32; 3]> = reader
-        .read_positions()
-        .ok_or_else(|| BakeError::Invalid(format!(
-            "glTF '{}' primitive missing required POSITION attribute",
-            input.display()
-        )))?
-        .collect();
-
-    // Defaults match the OBJ baker: missing normals -> +Y, missing
-    // UVs -> (0, 0). gltf::Reader returns None when the attribute
-    // is absent.
-    let raw_normals: Vec<[f32; 3]> = reader
-        .read_normals()
-        .map(|it| it.collect())
-        .unwrap_or_else(|| vec![[0.0, 1.0, 0.0]; raw_positions.len()]);
-
-    let raw_uvs: Vec<[f32; 2]> = reader
-        .read_tex_coords(0)
-        .map(|tc| tc.into_f32().collect())
-        .unwrap_or_else(|| vec![[0.0, 0.0]; raw_positions.len()]);
-
-    if raw_normals.len() != raw_positions.len() || raw_uvs.len() != raw_positions.len() {
-        return Err(BakeError::Invalid(format!(
-            "glTF '{}' vertex attribute counts mismatch (positions={}, normals={}, uvs={})",
-            input.display(), raw_positions.len(), raw_normals.len(), raw_uvs.len()
-        )));
-    }
-
-    // Apply the node transform to positions; normals get the
-    // upper-left 3x3 (no translation, no perspective). For non-
-    // uniform scale this isn't perfectly correct (should use the
-    // inverse-transpose), but uniform scale is the common case
-    // and the engine doesn't lighting yet anyway.
-    let positions: Vec<[f32; 3]> = raw_positions.iter()
-        .map(|p| transform_point(&node_transform, *p))
-        .collect();
-    let normals: Vec<[f32; 3]> = raw_normals.iter()
-        .map(|n| normalize3(transform_dir(&normal_matrix, *n)))
-        .collect();
-
-    // Indices: glTF allows u8/u16/u32. Use into_u32() to get a
-    // single iteration type. Missing indices means sequential
-    // triangles (0,1,2)(3,4,5)... so generate them.
-    let raw_indices: Vec<u32> = reader
-        .read_indices()
-        .map(|it| it.into_u32().collect())
-        .unwrap_or_else(|| (0..positions.len() as u32).collect());
-
-    if raw_indices.len() % 3 != 0 {
-        return Err(BakeError::Invalid(format!(
-            "glTF '{}' triangle list has {} indices (not divisible by 3)",
-            input.display(), raw_indices.len()
-        )));
-    }
-
-    // Dedup via the same key shape as the OBJ baker (8 floats as
-    // bits). glTF source data is often pre-deduped so this is
-    // mostly identity, but we keep the pass to (a) enforce the
-    // u16 vertex limit, (b) match OBJ baker behavior, (c) catch
-    // exporters that emit non-indexed triangle soup.
-    let mut vertices: Vec<Vertex> = Vec::new();
-    let mut indices:  Vec<u16>    = Vec::new();
-    let mut dedup:    HashMap<[u32; 8], u16> = HashMap::new();
-
-    for &raw_idx in &raw_indices {
-        let i: usize = raw_idx as usize;
-        if i >= positions.len() {
-            return Err(BakeError::Invalid(format!(
-                "glTF '{}' index {} out of range (vertex count {})",
-                input.display(), i, positions.len()
-            )));
-        }
-        let v: Vertex = Vertex {
-            pos:    positions[i],
-            uv:     raw_uvs[i],
-            normal: normals[i],
-        };
-        let key: [u32; 8] = [
-            v.pos[0].to_bits(), v.pos[1].to_bits(), v.pos[2].to_bits(),
-            v.uv[0].to_bits(),  v.uv[1].to_bits(),
-            v.normal[0].to_bits(), v.normal[1].to_bits(), v.normal[2].to_bits(),
-        ];
-        let idx: u16 = match dedup.get(&key) {
-            Some(&existing) => existing,
-            None => {
-                let new_idx: u16 = vertices.len().try_into().map_err(|_| {
-                    BakeError::Invalid(format!(
-                        "glTF '{}' yields more than 65535 unique vertices after dedup; \
-                         current engine uses u16 indices. Split or simplify the mesh.",
-                        input.display()
-                    ))
-                })?;
-                vertices.push(v);
-                dedup.insert(key, new_idx);
-                new_idx
-            }
-        };
-        indices.push(idx);
-    }
-
-    write_kmesh(output, &vertices, &indices)
+    write_kmesh(output, &data.vertices, &data.indices)
 }
 
 // ── Transform helpers ──────────────────────────────────────────
@@ -238,7 +254,7 @@ fn walk(node: gltf::Node<'_>, mesh_index: usize, parent: [[f32; 4]; 4]) -> Optio
 }
 
 // Column-major 4x4 matrix multiply matching glTF's storage convention.
-fn mat4_mul(a: [[f32; 4]; 4], b: [[f32; 4]; 4]) -> [[f32; 4]; 4] {
+pub(crate) fn mat4_mul(a: [[f32; 4]; 4], b: [[f32; 4]; 4]) -> [[f32; 4]; 4] {
     let mut out: [[f32; 4]; 4] = [[0.0; 4]; 4];
     for col in 0..4 {
         for row in 0..4 {

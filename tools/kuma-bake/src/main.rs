@@ -22,8 +22,10 @@ enum Command {
     Mesh { input: PathBuf, output: PathBuf },
     /// Convert a PNG/JPEG/TGA image into a .ktex binary (RGBA8)
     Tex { input: PathBuf, output: PathBuf },
-    /// Convert a glTF / GLB mesh into a .kmesh binary
+    /// Convert a single-mesh glTF / GLB into a .kmesh binary (transform baked in)
     Gltf { input: PathBuf, output: PathBuf },
+    /// Convert a multi-mesh glTF / GLB scene into a .kscene + sibling .kmesh files
+    Scene { input: PathBuf, output: PathBuf },
     /// Convert a .wav (decoded to PCM) or .ogg (passthrough) into a .ksound binary
     Sound { input: PathBuf, output: PathBuf },
 }
@@ -35,6 +37,7 @@ fn main() -> ExitCode {
         Command::Mesh  { input, output } => kuma_bake::bake_mesh(&input, &output),
         Command::Tex   { input, output } => kuma_bake::bake_texture(&input, &output),
         Command::Gltf  { input, output } => kuma_bake::bake_gltf(&input, &output),
+        Command::Scene { input, output } => kuma_bake::bake_scene(&input, &output),
         Command::Sound { input, output } => kuma_bake::bake_sound(&input, &output),
     };
 

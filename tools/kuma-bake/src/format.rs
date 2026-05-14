@@ -20,10 +20,12 @@ use bytemuck::{Pod, Zeroable};
 pub const MAGIC_KMESH:  [u8; 4] = *b"KMSH";
 pub const MAGIC_KTEX:   [u8; 4] = *b"KTEX";
 pub const MAGIC_KSOUND: [u8; 4] = *b"KSND";
+pub const MAGIC_KSCENE: [u8; 4] = *b"KSCN";
 
 pub const KMESH_VERSION:  u32 = 1;
 pub const KTEX_VERSION:   u32 = 1;
 pub const KSOUND_VERSION: u32 = 1;
+pub const KSCENE_VERSION: u32 = 1;
 
 // ── Texture pixel formats ───────────────────────────────────────
 // Only RGBA8 in v1; compression formats (BC7, BC5) arrive later.
@@ -40,6 +42,13 @@ pub const AUDIO_FORMAT_PCM_F32: u32 = 0;
 pub const AUDIO_FORMAT_OGG:     u32 = 1;
 pub const AUDIO_FORMAT_MP3:     u32 = 2;
 pub const AUDIO_FORMAT_FLAC:    u32 = 3;
+
+// ── Scene constants ─────────────────────────────────────────────
+// Sentinel for KSceneNodeEntry::mesh_index that means "this node has
+// no geometry" - used by group nodes / spawn markers / cameras when
+// the bake decides to keep them. Currently the bake DROPS no-mesh
+// nodes; the constant exists for forward compatibility.
+pub const KSCENE_NO_MESH: u32 = 0xFFFF_FFFF;
 
 // ── Vertex ──────────────────────────────────────────────────────
 // Per-vertex layout consumed by the engine's Vulkan vertex input.
@@ -105,6 +114,40 @@ pub struct KSoundHeader {
     pub payload_size:   u32,
 }
 
+// ── KScene header + tables ──────────────────────────────────────
+// 32-byte header followed by three tables:
+//   mesh table   (mesh_count entries, KSceneMeshEntry each)
+//   node table   (node_count entries, KSceneNodeEntry each)
+//   string table (string_table_size bytes, packed utf-8 paths)
+
+#[repr(C)]
+#[derive(Pod, Zeroable, Copy, Clone, Debug)]
+pub struct KSceneHeader {
+    pub magic:               [u8; 4],
+    pub version:             u32,
+    pub mesh_count:          u32,
+    pub node_count:          u32,
+    pub mesh_table_offset:   u32,
+    pub node_table_offset:   u32,
+    pub string_table_offset: u32,
+    pub string_table_size:   u32,
+}
+
+#[repr(C)]
+#[derive(Pod, Zeroable, Copy, Clone, Debug)]
+pub struct KSceneMeshEntry {
+    pub path_offset: u32,  // offset into string table (RELATIVE to its start)
+    pub path_length: u32,
+}
+
+#[repr(C)]
+#[derive(Pod, Zeroable, Copy, Clone, Debug)]
+pub struct KSceneNodeEntry {
+    pub mesh_index: u32,        // KSCENE_NO_MESH for no-geometry nodes
+    pub _reserved:  u32,
+    pub transform:  [f32; 16],  // column-major 4x4, world space
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -122,9 +165,17 @@ mod tests {
     fn headers_are_32_bytes() {
         // Header size is part of the file format - readers compute
         // payload offsets relative to it.
-        assert_eq!(size_of::<KMeshHeader>(), 32);
-        assert_eq!(size_of::<KTexHeader>(), 32);
+        assert_eq!(size_of::<KMeshHeader>(),  32);
+        assert_eq!(size_of::<KTexHeader>(),   32);
         assert_eq!(size_of::<KSoundHeader>(), 32);
+        assert_eq!(size_of::<KSceneHeader>(), 32);
+    }
+
+    #[test]
+    fn scene_table_entry_sizes_are_stable() {
+        // Mesh entry: 4 + 4 = 8. Node entry: 4 + 4 + 16*4 = 72.
+        assert_eq!(size_of::<KSceneMeshEntry>(), 8);
+        assert_eq!(size_of::<KSceneNodeEntry>(), 72);
     }
 
     #[test]
@@ -135,6 +186,7 @@ mod tests {
         assert_eq!(&MAGIC_KMESH,  b"KMSH");
         assert_eq!(&MAGIC_KTEX,   b"KTEX");
         assert_eq!(&MAGIC_KSOUND, b"KSND");
+        assert_eq!(&MAGIC_KSCENE, b"KSCN");
     }
 
     #[test]
