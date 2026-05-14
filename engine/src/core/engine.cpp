@@ -84,6 +84,14 @@ bool init(const EngineConfig& config) {
         return false;
     }
 
+    if (!audio::init()) {
+        // Audio is non-fatal: the game can still run without sound,
+        // and on CI/headless boxes there may be no device available.
+        // Log loudly but continue boot. The audio:: API becomes a
+        // collection of safe no-ops in this state.
+        kuma::log::warn("Audio init failed; continuing without sound");
+    }
+
     // Load default resources via the resource manager
     const auto* mesh = s_resource_manager.load_mesh_binary(
         platform::exe_relative("assets/models/quad.kmesh").c_str());
@@ -117,6 +125,7 @@ bool init(const EngineConfig& config) {
 void shutdown() {
     s_renderer.wait_idle();         // GPU finishes all work
     debug::shutdown();              // tears down ImGui (must be before renderer)
+    audio::shutdown();              // stop sounds before SDL releases the device
     character::shutdown();          // release character controllers before physics
     physics::shutdown();            // release Jolt resources before SDL/window go
     s_resource_manager.shutdown();  // safe to destroy textures/meshes
