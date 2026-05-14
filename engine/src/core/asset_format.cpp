@@ -152,6 +152,17 @@ ParseResult parse_kscene_header(const void* data, size_t size, KSceneHeader& out
         return ParseResult::OffsetOutOfBounds;
     }
 
+    // Material table fits within buffer.
+    if (would_overflow(out_header.material_count, sizeof(KSceneMeshEntry))) {
+        return ParseResult::PayloadOverflow;
+    }
+    const size_t material_table_bytes =
+        static_cast<size_t>(out_header.material_count) * sizeof(KSceneMeshEntry);
+    if (out_header.material_table_offset > size ||
+        material_table_bytes > size - out_header.material_table_offset) {
+        return ParseResult::OffsetOutOfBounds;
+    }
+
     // Node table fits within buffer.
     if (would_overflow(out_header.node_count, sizeof(KSceneNodeEntry))) {
         return ParseResult::PayloadOverflow;
@@ -180,13 +191,68 @@ ParseResult parse_kscene_header(const void* data, size_t size, KSceneHeader& out
         }
     }
 
-    // Per-node mesh_index must be valid (or the explicit no-mesh sentinel).
+    // Per-material path entries must point inside the string table.
+    const auto* material_entries = reinterpret_cast<const KSceneMeshEntry*>(
+        static_cast<const std::uint8_t*>(data) + out_header.material_table_offset);
+    for (uint32_t i = 0; i < out_header.material_count; ++i) {
+        const KSceneMeshEntry& m = material_entries[i];
+        if (m.path_offset > out_header.string_table_size ||
+            m.path_length > out_header.string_table_size - m.path_offset) {
+            return ParseResult::OffsetOutOfBounds;
+        }
+    }
+
+    // Per-node mesh_index + material_index must be valid or sentinel.
     const auto* node_entries = reinterpret_cast<const KSceneNodeEntry*>(
         static_cast<const std::uint8_t*>(data) + out_header.node_table_offset);
     for (uint32_t i = 0; i < out_header.node_count; ++i) {
         const KSceneNodeEntry& n = node_entries[i];
         if (n.mesh_index != kSceneNoMesh && n.mesh_index >= out_header.mesh_count) {
             return ParseResult::BadMeshIndex;
+        }
+        if (n.material_index != kSceneNoMaterial &&
+            n.material_index >= out_header.material_count) {
+            return ParseResult::BadMaterialIndex;
+        }
+    }
+
+    return ParseResult::Ok;
+}
+
+ParseResult parse_kmaterial_header(const void* data, size_t size, KMaterialHeader& out_header) {
+    if (size < sizeof(KMaterialHeader)) return ParseResult::TooSmall;
+
+    std::memcpy(&out_header, data, sizeof(out_header));
+
+    if (out_header.magic != kMagicKMaterial) return ParseResult::BadMagic;
+    if (out_header.version != kKMaterialVersion) return ParseResult::VersionMismatch;
+    if (out_header.alpha_mode > kAlphaModeMaxKnown) {
+        return ParseResult::UnsupportedFormat;
+    }
+
+    // String table sits immediately after the header. Bounds check.
+    const size_t string_table_offset = sizeof(KMaterialHeader);
+    if (string_table_offset > size ||
+        out_header.string_table_size > size - string_table_offset) {
+        return ParseResult::OffsetOutOfBounds;
+    }
+
+    // Validate every (offset, length) pair against the string table.
+    // length == 0 means "this texture slot is unused" so offset is
+    // ignored - skip the bounds check for those entries.
+    struct PathRef { uint32_t off; uint32_t len; };
+    const PathRef path_entries[] = {
+        {out_header.diffuse_path_offset,            out_header.diffuse_path_length},
+        {out_header.normal_path_offset,             out_header.normal_path_length},
+        {out_header.metallic_roughness_path_offset, out_header.metallic_roughness_path_length},
+        {out_header.occlusion_path_offset,          out_header.occlusion_path_length},
+        {out_header.emissive_path_offset,           out_header.emissive_path_length},
+    };
+    for (const auto& p : path_entries) {
+        if (p.len == 0) continue;
+        if (p.off > out_header.string_table_size ||
+            p.len > out_header.string_table_size - p.off) {
+            return ParseResult::OffsetOutOfBounds;
         }
     }
 

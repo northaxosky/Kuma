@@ -21,7 +21,8 @@ use std::path::{Path, PathBuf};
 
 use crate::error::BakeError;
 use crate::format::{
-    write_kmesh, KSceneHeader, KSceneMeshEntry, KSceneNodeEntry, KSCENE_VERSION, MAGIC_KSCENE,
+    write_kmesh, KSceneHeader, KSceneMeshEntry, KSceneNodeEntry, KSCENE_NO_MATERIAL,
+    KSCENE_VERSION, MAGIC_KSCENE,
 };
 use crate::gltf::{extract_primitive_local, mat4_mul};
 
@@ -313,20 +314,29 @@ fn walk_node(
 // then mesh table (8 bytes per entry, path offsets into the string
 // table), then node table (72 bytes per entry, world transform),
 // then a packed string table containing every mesh path back-to-back.
+//
+// v2 also reserves space for a material table between the mesh table
+// and the node table. The current bake leaves it empty (material_count
+// == 0) and stamps every node's material_index with KSCENE_NO_MATERIAL,
+// so the runtime falls back to the default white material. A later
+// pass (the materials commit's bake side) populates it.
 fn write_kscene(
     output: &Path,
     mesh_paths: &[String],
     nodes: &[PendingNode],
 ) -> Result<(), BakeError> {
     let header_size = std::mem::size_of::<KSceneHeader>() as u32;
-    let mesh_count: u32 = mesh_paths.len() as u32;
-    let node_count: u32 = nodes.len() as u32;
+    let mesh_count:     u32 = mesh_paths.len() as u32;
+    let material_count: u32 = 0;  // populated by the materials bake pass
+    let node_count:     u32 = nodes.len() as u32;
 
-    let mesh_table_offset:   u32 = header_size;
-    let mesh_table_size:     u32 = mesh_count * std::mem::size_of::<KSceneMeshEntry>() as u32;
-    let node_table_offset:   u32 = mesh_table_offset + mesh_table_size;
-    let node_table_size:     u32 = node_count * std::mem::size_of::<KSceneNodeEntry>() as u32;
-    let string_table_offset: u32 = node_table_offset + node_table_size;
+    let mesh_table_offset:     u32 = header_size;
+    let mesh_table_size:       u32 = mesh_count * std::mem::size_of::<KSceneMeshEntry>() as u32;
+    let material_table_offset: u32 = mesh_table_offset + mesh_table_size;
+    let material_table_size:   u32 = material_count * std::mem::size_of::<KSceneMeshEntry>() as u32;
+    let node_table_offset:     u32 = material_table_offset + material_table_size;
+    let node_table_size:       u32 = node_count * std::mem::size_of::<KSceneNodeEntry>() as u32;
+    let string_table_offset:   u32 = node_table_offset + node_table_size;
 
     // Build mesh entries + string table simultaneously: each path
     // gets concatenated into a single buffer with its offset and
@@ -342,6 +352,10 @@ fn write_kscene(
         mesh_entries.push(entry);
         string_table.extend_from_slice(bytes);
     }
+
+    // Material table is empty in this bake pass.
+    let material_entries: Vec<KSceneMeshEntry> = Vec::new();
+
     let string_table_size: u32 = string_table.len() as u32;
 
     // Node entries: copy the 4x4 transform out of the column-of-
@@ -357,18 +371,20 @@ fn write_kscene(
             }
         }
         node_entries.push(KSceneNodeEntry {
-            mesh_index: n.mesh_index,
-            _reserved:  0,
-            transform:  t,
+            mesh_index:     n.mesh_index,
+            material_index: KSCENE_NO_MATERIAL,
+            transform:      t,
         });
     }
 
     let header = KSceneHeader {
-        magic:               MAGIC_KSCENE,
-        version:             KSCENE_VERSION,
+        magic:                 MAGIC_KSCENE,
+        version:               KSCENE_VERSION,
         mesh_count,
+        material_count,
         node_count,
         mesh_table_offset,
+        material_table_offset,
         node_table_offset,
         string_table_offset,
         string_table_size,
@@ -380,6 +396,7 @@ fn write_kscene(
     let mut file: fs::File = fs::File::create(output).map_err(|e| BakeError::io(output, e))?;
     file.write_all(bytemuck::bytes_of(&header)).map_err(|e| BakeError::io(output, e))?;
     file.write_all(bytemuck::cast_slice(&mesh_entries)).map_err(|e| BakeError::io(output, e))?;
+    file.write_all(bytemuck::cast_slice(&material_entries)).map_err(|e| BakeError::io(output, e))?;
     file.write_all(bytemuck::cast_slice(&node_entries)).map_err(|e| BakeError::io(output, e))?;
     file.write_all(&string_table).map_err(|e| BakeError::io(output, e))?;
     Ok(())

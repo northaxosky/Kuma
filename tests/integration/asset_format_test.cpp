@@ -35,6 +35,7 @@ using kuma::asset_format::kMagicKScene;
 using kuma::asset_format::kMagicKSound;
 using kuma::asset_format::kMagicKTex;
 using kuma::asset_format::kSceneNoMesh;
+using kuma::asset_format::kSceneNoMaterial;
 using kuma::asset_format::parse_kmesh_header;
 using kuma::asset_format::parse_kscene_header;
 using kuma::asset_format::parse_ksound_header;
@@ -372,32 +373,37 @@ TEST(IntegrationAssetFormatKSound, TruncatedPayloadReportsOffsetOutOfBounds) {
 namespace {
 // Build a minimal valid .kscene blob: header + mesh_count mesh
 // entries (each with empty path strings) + node_count node entries
-// (all pointing at mesh 0, identity transform) + a string table
-// just big enough to hold the placeholder path "0.kmesh" once.
+// (all pointing at mesh 0 with no material, identity transform) +
+// a string table just big enough to hold the placeholder path
+// "0.kmesh" once. The material table is empty.
 std::vector<char> make_valid_kscene_bytes(uint32_t mesh_count, uint32_t node_count) {
     constexpr char kPath[] = "0.kmesh";
     const size_t path_len = sizeof(kPath) - 1;
 
-    const size_t header_size = sizeof(KSceneHeader);
-    const size_t mesh_table_size = mesh_count * sizeof(KSceneMeshEntry);
-    const size_t node_table_size = node_count * sizeof(KSceneNodeEntry);
-    const size_t string_table_size = mesh_count > 0 ? path_len : 0;
+    const size_t header_size         = sizeof(KSceneHeader);
+    const size_t mesh_table_size     = mesh_count * sizeof(KSceneMeshEntry);
+    const size_t material_table_size = 0;  // no materials in baseline blob
+    const size_t node_table_size     = node_count * sizeof(KSceneNodeEntry);
+    const size_t string_table_size   = mesh_count > 0 ? path_len : 0;
 
-    const size_t mesh_table_offset = header_size;
-    const size_t node_table_offset = mesh_table_offset + mesh_table_size;
-    const size_t string_table_offset = node_table_offset + node_table_size;
+    const size_t mesh_table_offset     = header_size;
+    const size_t material_table_offset = mesh_table_offset + mesh_table_size;
+    const size_t node_table_offset     = material_table_offset + material_table_size;
+    const size_t string_table_offset   = node_table_offset + node_table_size;
 
     std::vector<char> bytes(string_table_offset + string_table_size, 0);
 
     KSceneHeader hdr{};
-    hdr.magic = kMagicKScene;
-    hdr.version = kKSceneVersion;
-    hdr.mesh_count = mesh_count;
-    hdr.node_count = node_count;
-    hdr.mesh_table_offset = static_cast<uint32_t>(mesh_table_offset);
-    hdr.node_table_offset = static_cast<uint32_t>(node_table_offset);
-    hdr.string_table_offset = static_cast<uint32_t>(string_table_offset);
-    hdr.string_table_size = static_cast<uint32_t>(string_table_size);
+    hdr.magic                 = kMagicKScene;
+    hdr.version               = kKSceneVersion;
+    hdr.mesh_count            = mesh_count;
+    hdr.material_count        = 0;
+    hdr.node_count            = node_count;
+    hdr.mesh_table_offset     = static_cast<uint32_t>(mesh_table_offset);
+    hdr.material_table_offset = static_cast<uint32_t>(material_table_offset);
+    hdr.node_table_offset     = static_cast<uint32_t>(node_table_offset);
+    hdr.string_table_offset   = static_cast<uint32_t>(string_table_offset);
+    hdr.string_table_size     = static_cast<uint32_t>(string_table_size);
     std::memcpy(bytes.data(), &hdr, sizeof(hdr));
 
     // Mesh entries all point at offset 0, length path_len.
@@ -409,15 +415,17 @@ std::vector<char> make_valid_kscene_bytes(uint32_t mesh_count, uint32_t node_cou
                     &m, sizeof(m));
     }
 
-    // Node entries all reference mesh 0 with identity transform.
+    // Node entries all reference mesh 0 (or sentinel) with identity
+    // transform. material_index uses the no-material sentinel so the
+    // baseline blob has zero material dependencies.
     for (uint32_t i = 0; i < node_count; ++i) {
         KSceneNodeEntry n{};
-        n.mesh_index = mesh_count > 0 ? 0 : kSceneNoMesh;
-        // Identity column-major: 1 at indices 0, 5, 10, 15.
-        n.transform[0]  = 1.0f;
-        n.transform[5]  = 1.0f;
-        n.transform[10] = 1.0f;
-        n.transform[15] = 1.0f;
+        n.mesh_index     = mesh_count > 0 ? 0u : kSceneNoMesh;
+        n.material_index = kSceneNoMaterial;
+        n.transform[0]   = 1.0f;
+        n.transform[5]   = 1.0f;
+        n.transform[10]  = 1.0f;
+        n.transform[15]  = 1.0f;
         std::memcpy(bytes.data() + node_table_offset + i * sizeof(KSceneNodeEntry),
                     &n, sizeof(n));
     }
