@@ -278,6 +278,11 @@ bool RendererImpl::create_material_descriptor_pool() {
     pool_info.poolSizeCount = 1;
     pool_info.pPoolSizes    = &pool_size;
     pool_info.maxSets       = kMaxMaterials;
+    // Allow individual sets to be freed so ResourceManager can
+    // release a material's descriptor set when the material is
+    // destroyed, without nuking the whole pool. Required by
+    // vkFreeDescriptorSets per Vulkan spec.
+    pool_info.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
 
     if (vkCreateDescriptorPool(device_, &pool_info, nullptr, &material_pool_) != VK_SUCCESS) {
         kuma::log::error("Failed to create material descriptor pool");

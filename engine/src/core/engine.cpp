@@ -57,7 +57,7 @@ bool init(const EngineConfig& config) {
         return false;
     }
 
-    if (!s_resource_manager.init(s_renderer.gpu_context())) {
+    if (!s_resource_manager.init(s_renderer)) {
         s_renderer.shutdown();
         s_window.destroy();
         input::shutdown();

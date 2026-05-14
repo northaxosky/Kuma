@@ -27,7 +27,8 @@ struct Scene {
     std::filesystem::path origin_dir;     // .kscene's parent directory
     std::vector<std::byte> raw;            // entire .kscene file
     asset_format::KSceneHeader header{};
-    std::vector<std::filesystem::path> mesh_paths;  // resolved absolute paths
+    std::vector<std::filesystem::path> mesh_paths;      // resolved absolute paths
+    std::vector<std::filesystem::path> material_paths;  // resolved absolute paths
 };
 
 namespace {
@@ -56,11 +57,11 @@ std::vector<std::byte> read_file(const std::filesystem::path& path) {
     return bytes;
 }
 
-// Translate a relative mesh path stored in the .kscene's string
-// table into an absolute path on disk. Rejects absolute paths and
-// any "../" traversal so a maliciously-crafted .kscene can't
-// point at arbitrary files outside its directory tree.
-std::optional<std::filesystem::path> resolve_mesh_path(
+// Translate a relative path (mesh or material) stored in the
+// .kscene's string table into an absolute path on disk. Rejects
+// absolute paths and any "../" traversal so a maliciously-crafted
+// .kscene can't point at arbitrary files outside its directory tree.
+std::optional<std::filesystem::path> resolve_relative_path(
     const std::filesystem::path& origin_dir,
     std::string_view relative
 ) {
@@ -224,7 +225,7 @@ const Scene* load(const char* path) {
     for (uint32_t i = 0; i < header.mesh_count; ++i) {
         const auto& entry = mesh_entries[i];
         std::string_view rel(string_table + entry.path_offset, entry.path_length);
-        auto resolved = resolve_mesh_path(scene->origin_dir, rel);
+        auto resolved = resolve_relative_path(scene->origin_dir, rel);
         if (!resolved) {
             kuma::log::warn(
                 "scene::load: mesh #%u '%.*s' rejected (absolute path or '..' traversal)",
@@ -232,6 +233,27 @@ const Scene* load(const char* path) {
             scene->mesh_paths.emplace_back();
         } else {
             scene->mesh_paths.push_back(*resolved);
+        }
+    }
+
+    // Materials follow the same string-table conventions and
+    // path-safety rules as meshes. Material table is empty for
+    // scenes baked before the materials pass landed - the loop
+    // below just doesn't execute in that case.
+    const auto* material_entries = reinterpret_cast<const asset_format::KSceneMeshEntry*>(
+        bytes.data() + header.material_table_offset);
+    scene->material_paths.reserve(header.material_count);
+    for (uint32_t i = 0; i < header.material_count; ++i) {
+        const auto& entry = material_entries[i];
+        std::string_view rel(string_table + entry.path_offset, entry.path_length);
+        auto resolved = resolve_relative_path(scene->origin_dir, rel);
+        if (!resolved) {
+            kuma::log::warn(
+                "scene::load: material #%u '%.*s' rejected (absolute path or '..' traversal)",
+                i, static_cast<int>(rel.size()), rel.data());
+            scene->material_paths.emplace_back();
+        } else {
+            scene->material_paths.push_back(*resolved);
         }
     }
 
@@ -271,6 +293,21 @@ SceneInstance spawn(const Scene* scene, Registry& registry) {
         mesh_lookup[i] = m;
     }
 
+    // Same shape for materials. Empty material table (no per-node
+    // material assignments yet) just leaves the lookup empty and
+    // every node falls back to the renderer's default material.
+    std::vector<const Material*> material_lookup(scene->material_paths.size(), nullptr);
+    for (size_t i = 0; i < scene->material_paths.size(); ++i) {
+        if (scene->material_paths[i].empty()) continue;
+        const Material* m = g_state->resources->load_material_binary(
+            scene->material_paths[i].string().c_str());
+        if (m == nullptr) {
+            kuma::log::warn("scene::spawn: material '%s' failed to load",
+                            scene->material_paths[i].string().c_str());
+        }
+        material_lookup[i] = m;
+    }
+
     // Walk node table, spawning one entity per entry. Nodes whose
     // mesh_index is kSceneNoMesh (or whose mesh failed to load)
     // still spawn an entity with Transform + RenderTag - the render
@@ -293,6 +330,13 @@ SceneInstance spawn(const Scene* scene, Registry& registry) {
             mesh = mesh_lookup[node.mesh_index];
         }
         registry.add(e, MeshRef{mesh});
+
+        const Material* material = nullptr;
+        if (node.material_index != asset_format::kSceneNoMaterial &&
+            node.material_index < material_lookup.size()) {
+            material = material_lookup[node.material_index];
+        }
+        registry.add(e, MaterialRef{material});
 
         // RenderTag is currently a struct{} marker living in the
         // sandbox. The scene module shouldn't depend on it - the

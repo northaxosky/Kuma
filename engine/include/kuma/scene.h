@@ -28,6 +28,7 @@
 #include <cstdint>
 
 #include <kuma/ecs.h>
+#include <kuma/material.h>
 #include <kuma/math.h>
 
 namespace kuma {
@@ -104,6 +105,17 @@ uint32_t loaded_scene_count();
 // are skipped silently so partial scene loads don't crash.
 struct MeshRef {
     const Mesh* mesh = nullptr;
+};
+
+// ── MaterialRef component ───────────────────────────────────────
+// Pure-data component holding a borrowed pointer to a Material
+// owned by ResourceManager. The render system uses it to bind the
+// right texture set for an entity's mesh. Entities that lack this
+// component (or that point at a null Material) render with the
+// renderer's default material - useful for placeholder geometry
+// before the materials bake pass populates real data.
+struct MaterialRef {
+    const Material* material = nullptr;
 };
 
 }  // namespace kuma

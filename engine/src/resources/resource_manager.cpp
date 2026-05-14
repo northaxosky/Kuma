@@ -1,18 +1,23 @@
 // ── Resource Manager ────────────────────────────────────────────
-// Loads, caches, and manages GPU resources (textures, meshes).
-// Owns a GPU context (device, queue, etc.) to upload data to the GPU.
+// Loads, caches, and manages GPU resources (textures, meshes,
+// materials). Owns a GPU context (device, queue, etc.) to upload
+// data to the GPU and a Renderer reference for material descriptor
+// allocation.
 //
 // All loaders consume the engine's binary asset format produced by
-// kuma-bake (.kmesh, .ktex). Source-format parsing (.obj, .png) is
-// the bake tool's job and never happens at runtime.
+// kuma-bake (.kmesh, .ktex, .kmaterial). Source-format parsing
+// (.obj, .png, .gltf) is the bake tool's job and never happens at
+// runtime.
 
 #include <kuma/asset_format.h>
 #include <kuma/log.h>
+#include <kuma/renderer.h>
 #include <kuma/resource_manager.h>
 
 #include <array>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <string>
 #include <unordered_map>
@@ -27,13 +32,29 @@ namespace kuma {
 
 class ResourceManager::Impl {
 public:
-    bool init(GpuContext gpu) {
-        gpu_ = gpu;
+    bool init(Renderer& renderer) {
+        renderer_ = &renderer;
+        auto* ctx = static_cast<GpuContext*>(renderer.gpu_context());
+        gpu_ = *ctx;
         return true;
     }
 
     void shutdown() {
-        for (auto& [path, texture] : texture_cache_) {
+        // Materials destruction MUST happen before texture
+        // destruction: each material's descriptor set references
+        // texture image views, and vkFreeDescriptorSets needs those
+        // views still alive to cleanly remove them from the pool's
+        // bookkeeping. After this loop the pool is empty and texture
+        // VkImageViews can be destroyed without validation noise.
+        for (auto& [path, material] : material_cache_) {
+            if (material.descriptor_set != nullptr) {
+                renderer_->free_material_descriptor_set(material.descriptor_set);
+                material.descriptor_set = nullptr;
+            }
+        }
+        material_cache_.clear();
+
+        for (auto& [key, texture] : texture_cache_) {
             if (texture.sampler != VK_NULL_HANDLE)
                 vkDestroySampler(gpu_.device, texture.sampler, nullptr);
             if (texture.view != VK_NULL_HANDLE)
@@ -58,13 +79,19 @@ public:
         mesh_cache_.clear();
     }
 
-    const Texture* load_texture_binary(const char* path);
-    const Mesh* load_mesh_binary(const char* path);
+    const Texture*  load_texture_binary(const char* path, TextureUsage usage);
+    const Mesh*     load_mesh_binary(const char* path);
+    const Material* load_material_binary(const char* path);
 
-    GpuContext gpu_;
+    Renderer*   renderer_ = nullptr;
+    GpuContext  gpu_;
 
-    std::unordered_map<std::string, Texture> texture_cache_;
-    std::unordered_map<std::string, Mesh> mesh_cache_;
+    // Texture cache key includes usage so the same .ktex requested
+    // as Color and Data resolves to two GPU textures with different
+    // VkFormat (sRGB vs UNORM). Key format: "<path>|<usage_int>".
+    std::unordered_map<std::string, Texture>  texture_cache_;
+    std::unordered_map<std::string, Mesh>     mesh_cache_;
+    std::unordered_map<std::string, Material> material_cache_;
 
 private:
     uint32_t find_memory_type(uint32_t type_filter, VkMemoryPropertyFlags properties) const;
@@ -94,10 +121,9 @@ ResourceManager::~ResourceManager() {
     shutdown();
 }
 
-bool ResourceManager::init(void* gpu_context) {
+bool ResourceManager::init(Renderer& renderer) {
     impl_ = new Impl();
-    auto* ctx = static_cast<GpuContext*>(gpu_context);
-    return impl_->init(*ctx);
+    return impl_->init(renderer);
 }
 
 void ResourceManager::shutdown() {
@@ -108,12 +134,16 @@ void ResourceManager::shutdown() {
     }
 }
 
-const Texture* ResourceManager::load_texture_binary(const char* path) {
-    return impl_->load_texture_binary(path);
+const Texture* ResourceManager::load_texture_binary(const char* path, TextureUsage usage) {
+    return impl_->load_texture_binary(path, usage);
 }
 
 const Mesh* ResourceManager::load_mesh_binary(const char* path) {
     return impl_->load_mesh_binary(path);
+}
+
+const Material* ResourceManager::load_material_binary(const char* path) {
+    return impl_->load_material_binary(path);
 }
 
 // ── GPU Helpers ─────────────────────────────────────────────────
@@ -412,8 +442,19 @@ bool ResourceManager::Impl::upload_texture(const void* pixels, uint32_t width, u
 
 // ── Binary texture loader (.ktex produced by kuma-bake) ─────────
 
-const Texture* ResourceManager::Impl::load_texture_binary(const char* path) {
-    auto it = texture_cache_.find(path);
+const Texture* ResourceManager::Impl::load_texture_binary(const char* path, TextureUsage usage) {
+    // Cache key combines path with usage so the same .ktex requested
+    // as Color and Data resolves to two distinct GPU textures with
+    // different VkFormat (sRGB vs UNORM) - critical for normal maps,
+    // which must be sampled linearly even if the same source file
+    // also happens to be used as a diffuse somewhere.
+    std::string key;
+    key.reserve(std::strlen(path) + 2);
+    key.append(path);
+    key.push_back('|');
+    key.push_back(usage == TextureUsage::Color ? 'c' : 'd');
+
+    auto it = texture_cache_.find(key);
     if (it != texture_cache_.end()) {
         return &it->second;
     }
@@ -436,14 +477,108 @@ const Texture* ResourceManager::Impl::load_texture_binary(const char* path) {
         return nullptr;
     }
 
+    const VkFormat vk_format = (usage == TextureUsage::Color)
+        ? VK_FORMAT_R8G8B8A8_SRGB
+        : VK_FORMAT_R8G8B8A8_UNORM;
+
     Texture texture{};
     if (!upload_texture(bytes.data() + hdr.pixel_offset, hdr.width, hdr.height,
-                        VK_FORMAT_R8G8B8A8_SRGB, texture)) {
+                        vk_format, texture)) {
         return nullptr;
     }
 
-    kuma::log::info("Texture loaded: %s (%ux%u, binary)", path, hdr.width, hdr.height);
-    auto [inserted, _] = texture_cache_.emplace(path, texture);
+    kuma::log::info("Texture loaded: %s (%ux%u, %s)",
+                    path, hdr.width, hdr.height,
+                    usage == TextureUsage::Color ? "sRGB" : "linear");
+    auto [inserted, _] = texture_cache_.emplace(std::move(key), texture);
+    return &inserted->second;
+}
+
+// ── Binary material loader (.kmaterial produced by kuma-bake) ───
+//
+// The header references texture paths via offsets into a string
+// table that immediately follows the header in the file. Paths are
+// stored relative to the .kmaterial's parent directory so a scene's
+// material folder can be moved without rewriting paths.
+//
+// Each texture is loaded with the correct usage tag (Color for
+// diffuse and emissive, Data for the rest). Missing slots stay
+// nullptr; the renderer substitutes a default 1x1 texture at draw
+// time so the shader can sample every binding unconditionally.
+
+const Material* ResourceManager::Impl::load_material_binary(const char* path) {
+    auto it = material_cache_.find(path);
+    if (it != material_cache_.end()) {
+        return &it->second;
+    }
+
+    std::ifstream f(path, std::ios::binary | std::ios::ate);
+    if (!f) {
+        kuma::log::error("kmaterial open failed: %s", path);
+        return nullptr;
+    }
+    const std::streamsize size = f.tellg();
+    f.seekg(0, std::ios::beg);
+    std::vector<char> bytes(static_cast<size_t>(size));
+    f.read(bytes.data(), size);
+
+    asset_format::KMaterialHeader hdr{};
+    const asset_format::ParseResult pr =
+        asset_format::parse_kmaterial_header(bytes.data(), bytes.size(), hdr);
+    if (pr != asset_format::ParseResult::Ok) {
+        kuma::log::error("kmaterial parse failed (%d): %s", static_cast<int>(pr), path);
+        return nullptr;
+    }
+
+    // String table sits immediately after the header. The parser
+    // already validated every (offset, length) pair against
+    // string_table_size, so reads here are in-bounds by construction.
+    const char* string_table = bytes.data() + sizeof(asset_format::KMaterialHeader);
+    const std::filesystem::path material_dir =
+        std::filesystem::path(path).parent_path();
+
+    auto resolve_texture = [&](uint32_t offset, uint32_t length,
+                               TextureUsage usage) -> const Texture* {
+        if (length == 0) return nullptr;
+        std::string rel(string_table + offset, length);
+        std::filesystem::path resolved = material_dir / rel;
+        return load_texture_binary(resolved.string().c_str(), usage);
+    };
+
+    const Texture* slots[5] = {
+        resolve_texture(hdr.diffuse_path_offset,            hdr.diffuse_path_length,
+                        TextureUsage::Color),
+        resolve_texture(hdr.normal_path_offset,             hdr.normal_path_length,
+                        TextureUsage::Data),
+        resolve_texture(hdr.metallic_roughness_path_offset, hdr.metallic_roughness_path_length,
+                        TextureUsage::Data),
+        resolve_texture(hdr.occlusion_path_offset,          hdr.occlusion_path_length,
+                        TextureUsage::Data),
+        resolve_texture(hdr.emissive_path_offset,           hdr.emissive_path_length,
+                        TextureUsage::Color),
+    };
+
+    const void* slot_ptrs[5] = {slots[0], slots[1], slots[2], slots[3], slots[4]};
+    void* descriptor_set = renderer_->create_material_descriptor_set(slot_ptrs);
+    if (descriptor_set == nullptr) {
+        kuma::log::error("kmaterial descriptor set allocation failed: %s", path);
+        return nullptr;
+    }
+
+    Material mat{};
+    mat.descriptor_set     = descriptor_set;
+    mat.flags              = hdr.flags;
+    mat.alpha_mode         = hdr.alpha_mode;
+    std::memcpy(mat.base_color,      hdr.base_color,      sizeof(mat.base_color));
+    mat.alpha_cutoff       = hdr.alpha_cutoff;
+    mat.metallic_factor    = hdr.metallic_factor;
+    mat.roughness_factor   = hdr.roughness_factor;
+    mat.normal_scale       = hdr.normal_scale;
+    mat.occlusion_strength = hdr.occlusion_strength;
+    std::memcpy(mat.emissive_factor, hdr.emissive_factor, sizeof(mat.emissive_factor));
+
+    kuma::log::info("Material loaded: %s", path);
+    auto [inserted, _] = material_cache_.emplace(path, mat);
     return &inserted->second;
 }
 

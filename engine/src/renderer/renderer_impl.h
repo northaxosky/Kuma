@@ -103,6 +103,15 @@ public:
     // Set resources loaded by the resource manager
     void set_texture(const Texture* texture);
     void set_mesh(const Mesh* mesh);
+    void set_material(const Material* material);
+
+    // Material descriptor allocator. Public so the renderer.cpp
+    // wrapper can forward to it; called by ResourceManager via the
+    // public Renderer API. slots is in fixed order (diffuse, normal,
+    // metallic-roughness, occlusion, emissive); nullptr -> default
+    // for that slot.
+    VkDescriptorSet allocate_material_descriptor_set(const Texture* slots[5]);
+    void free_material_descriptor_set(VkDescriptorSet set);
 
     // Pick which graphics pipeline subsequent draw() calls use.
     // 0 = textured (default), 1 = debug-normal visualizer.
@@ -139,7 +148,6 @@ private:
     bool create_default_textures();
     bool create_material_descriptor_pool();
     void destroy_material_resources();
-    VkDescriptorSet allocate_material_descriptor_set(const Texture* slots[5]);
     bool create_command_pool();
     bool create_command_buffers();
     bool create_sync_objects();

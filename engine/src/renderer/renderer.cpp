@@ -62,6 +62,25 @@ void Renderer::set_texture(const void* texture) {
     impl_->set_texture(static_cast<const Texture*>(texture));
 }
 
+void Renderer::set_material(const Material* material) {
+    impl_->set_material(material);
+}
+
+void* Renderer::create_material_descriptor_set(const void* texture_slots[5]) {
+    const Texture* slots[5] = {
+        static_cast<const Texture*>(texture_slots[0]),
+        static_cast<const Texture*>(texture_slots[1]),
+        static_cast<const Texture*>(texture_slots[2]),
+        static_cast<const Texture*>(texture_slots[3]),
+        static_cast<const Texture*>(texture_slots[4]),
+    };
+    return impl_->allocate_material_descriptor_set(slots);
+}
+
+void Renderer::free_material_descriptor_set(void* descriptor_set) {
+    impl_->free_material_descriptor_set(static_cast<VkDescriptorSet>(descriptor_set));
+}
+
 void Renderer::set_view_projection(const Mat4& view_projection) {
     impl_->set_view_projection(view_projection);
 }
@@ -368,6 +387,23 @@ void RendererImpl::set_texture(const Texture* texture) {
         it = texture_to_material_set_.emplace(texture, set).first;
     }
     active_material_set_ = it->second;
+}
+
+void RendererImpl::set_material(const Material* material) {
+    if (material == nullptr || material->descriptor_set == nullptr) {
+        active_material_set_ = VK_NULL_HANDLE;
+        return;
+    }
+    active_material_set_ = static_cast<VkDescriptorSet>(material->descriptor_set);
+}
+
+void RendererImpl::free_material_descriptor_set(VkDescriptorSet set) {
+    if (set == VK_NULL_HANDLE) return;
+    if (active_material_set_ == set) {
+        active_material_set_ = VK_NULL_HANDLE;
+    }
+    vkFreeDescriptorSets(device_, material_pool_, 1, &set);
+    if (materials_allocated_ > 0) --materials_allocated_;
 }
 
 void RendererImpl::set_view_projection(const Mat4& view_projection) {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <kuma/material.h>
 #include <kuma/math.h>
 
 #include <cstdint>
@@ -60,8 +61,40 @@ public:
     void on_resize(int32_t width, int32_t height);
 
     // Set the active texture and mesh (loaded by ResourceManager).
+    // set_texture is a compatibility shim that wraps the texture in
+    // a single-slot material; new code should call set_material with
+    // a Material loaded from ResourceManager::load_material_binary.
     void set_texture(const void* texture);
     void set_mesh(const void* mesh);
+
+    // Bind a material's texture set for subsequent draw() calls.
+    // Pass nullptr to fall back to the renderer's defaults (a draw
+    // with no material set bound is silently skipped). The Material
+    // must outlive the draw call - the renderer holds a borrowed
+    // pointer until set_material is called again.
+    void set_material(const Material* material);
+
+    // Allocate a descriptor set for a material from the renderer's
+    // material pool. textures is an array of 5 const Texture*
+    // (cast to const void*) in slot order: diffuse, normal,
+    // metallic-roughness, occlusion, emissive. Pass nullptr in any
+    // slot to use the renderer's default 1x1 texture for that slot.
+    //
+    // Returns an opaque handle (a VkDescriptorSet) that the caller
+    // stores in Material::descriptor_set. Returns nullptr if the
+    // pool is exhausted (logs a warning).
+    //
+    // ResourceManager calls this from load_material_binary; game
+    // code should not call it directly.
+    void* create_material_descriptor_set(const void* texture_slots[5]);
+
+    // Free a material descriptor set previously returned by
+    // create_material_descriptor_set. Must be called with the GPU
+    // idle (call wait_idle first if unsure).
+    //
+    // ResourceManager calls this from shutdown / cache eviction;
+    // game code should not call it directly.
+    void free_material_descriptor_set(void* descriptor_set);
 
     // Pick which graphics pipeline subsequent draw() calls use.
     // 0 = textured (default), 1 = debug-normal visualizer (renders

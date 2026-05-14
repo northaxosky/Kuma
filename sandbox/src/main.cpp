@@ -294,16 +294,17 @@ int main() {
         }
 
         // ── Render Sponza meshes (textured pipeline) ─────────────
-        // Every entity with a MeshRef goes through the default
-        // pipeline. Sponza meshes will render with whatever
-        // placeholder texture is bound - they look "right" in
-        // structure (geometry + UVs) but will get the wrong colors
-        // until the Materials module lands.
+        // Each entity carries a MeshRef for geometry and a MaterialRef
+        // for textures. Entities without a real material (the bake
+        // currently leaves Sponza's material slot empty) get the
+        // renderer's defaults via set_material(nullptr).
         kuma::get_renderer().set_pipeline(0);
-        for (auto [e, transform, mesh_ref] : registry.view<kuma::Transform, kuma::MeshRef>()) {
+        for (auto [e, transform, mesh_ref, material_ref]
+                 : registry.view<kuma::Transform, kuma::MeshRef, kuma::MaterialRef>()) {
             (void)e;
             if (mesh_ref.mesh == nullptr) continue;
             kuma::get_renderer().set_mesh(mesh_ref.mesh);
+            kuma::get_renderer().set_material(material_ref.material);
             kuma::get_renderer().set_model_matrix(transform.model_matrix());
             kuma::get_renderer().draw();
         }
