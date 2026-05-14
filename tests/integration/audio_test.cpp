@@ -228,3 +228,29 @@ TEST_F(IntegrationAudio, RemoveSourceCleansUpInstance) {
     const auto& src_after = registry.get<kuma::AudioSource>(e);
     EXPECT_FALSE(src_after.created);
 }
+
+TEST_F(IntegrationAudio, ValidateAliveSweepCatchesLeakedLoopingInstance) {
+    const auto path = bake_test_sound("validate_alive");
+    const auto* sound = kuma::audio::load_sound(path.string().c_str());
+    ASSERT_NE(sound, nullptr);
+
+    kuma::Registry registry;
+    kuma::EntityID e = registry.create_entity();
+    kuma::AudioSource src;
+    src.sound = sound;
+    src.spatial = false;
+    src.looping = true;
+    registry.add(e, src);
+
+    kuma::audio::simulate(registry);
+    const uint32_t with_source = kuma::audio::playing_count();
+    EXPECT_GT(with_source, 0u);
+
+    // Direct destroy_entity bypasses audio::remove_source. The
+    // validate-alive sweep at the top of simulate should free the
+    // looping instance - without the sweep it would play forever
+    // because ma_sound_at_end never fires for looping sounds.
+    registry.destroy_entity(e);
+    kuma::audio::simulate(registry);
+    EXPECT_LT(kuma::audio::playing_count(), with_source);
+}

@@ -41,11 +41,14 @@ namespace {
 // ── Per-instance backend record ─────────────────────────────────
 // Each playing sound owns its own data source so multiple instances
 // of the same Sound can run concurrently with independent positions
-// and read cursors.
+// and read cursors. Instances spawned by play_sound / play_sound_at
+// have entity == EntityID{} - the validate-alive sweep skips those
+// because they have no owning ECS entity to validate against.
 struct InstanceRecord {
     ma_sound sound{};
     ma_audio_buffer_ref pcm_ref{};
     ma_decoder decoder{};
+    EntityID entity{};
     bool sound_inited = false;
     bool pcm_ref_inited = false;
     bool decoder_inited = false;
@@ -184,6 +187,7 @@ void free_instance(uint32_t index) {
     if (!rec.in_use) return;
     uninit_instance(rec);
     rec.in_use = false;
+    rec.entity = EntityID{};
     // Bump generation so any stale handles pointing at this slot
     // are detected as invalid by future stop_sound calls.
     ++rec.generation;
@@ -409,6 +413,11 @@ void sync_component(EntityID entity, AudioSource& src, const Transform* transfor
         src.handle = handle;
         src.created = true;
         src.playing = src.play_on_create;
+
+        // Tag the backing instance with its owning entity so the
+        // validate-alive sweep can clean it up if the entity is
+        // destroyed without going through audio::remove_source.
+        rec->entity = entity;
         return;
     }
 
@@ -433,6 +442,25 @@ void sync_component(EntityID entity, AudioSource& src, const Transform* transfor
 void simulate(Registry& registry) {
     if (g_state == nullptr) return;
 
+    // Validate-alive sweep: if a component-backed instance's entity
+    // was destroyed (or its AudioSource removed) without going through
+    // audio::remove_source / audio::destroy_entity, the instance
+    // would otherwise leak - looping sounds especially since
+    // ma_sound_at_end never returns true for them. Index-based walk
+    // mirrors the physics + character pattern.
+    for (uint32_t i = 0; i < g_state->instances.size(); ++i) {
+        InstanceRecord& rec = g_state->instances[i];
+        if (!rec.in_use) continue;
+        // Fire-and-forget instances have no owning entity; they're
+        // pruned by the ma_sound_at_end check below.
+        if (rec.entity.id == 0 && rec.entity.generation == 0) continue;
+        if (!registry.is_valid(rec.entity) || !registry.has<AudioSource>(rec.entity)) {
+            free_instance(i);
+        }
+    }
+
+    // Prune one-shots that finished naturally. Looping sounds never
+    // hit ma_sound_at_end so they're correctly preserved here.
     for (uint32_t i = 0; i < g_state->instances.size(); ++i) {
         InstanceRecord& rec = g_state->instances[i];
         if (!rec.in_use) continue;
