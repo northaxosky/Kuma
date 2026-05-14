@@ -35,6 +35,7 @@ add_executable(kuma-tests
     integration/audio_test.cpp
     integration/character_simulation_test.cpp
     integration/physics_simulation_test.cpp
+    integration/scene_test.cpp
 )
 
 target_link_libraries(kuma-tests PRIVATE
