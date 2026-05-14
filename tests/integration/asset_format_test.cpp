@@ -15,6 +15,15 @@
 #include <cstring>
 #include <vector>
 
+using kuma::asset_format::KMaterialHeader;
+using kuma::asset_format::kKMaterialVersion;
+using kuma::asset_format::kMagicKMaterial;
+using kuma::asset_format::kAlphaModeOpaque;
+using kuma::asset_format::kAlphaModeMask;
+using kuma::asset_format::kAlphaModeBlend;
+using kuma::asset_format::kAlphaModeMaxKnown;
+using kuma::asset_format::kMaterialFlagDoubleSided;
+using kuma::asset_format::parse_kmaterial_header;
 using kuma::asset_format::KMeshHeader;
 using kuma::asset_format::KSceneHeader;
 using kuma::asset_format::KSceneMeshEntry;
@@ -522,4 +531,198 @@ TEST(IntegrationAssetFormatKScene, NoMeshSentinelIsAccepted) {
     n.mesh_index = kSceneNoMesh;
     std::memcpy(bytes.data() + hdr.node_table_offset, &n, sizeof(n));
     EXPECT_EQ(parse_kscene_header(bytes.data(), bytes.size(), hdr), ParseResult::Ok);
+}
+
+TEST(IntegrationAssetFormatKScene, NodeReferencingMissingMaterialReportsBadMaterialIndex) {
+    // Baseline blob has material_count == 0, so any non-sentinel
+    // material_index points past the (empty) material table.
+    auto bytes = make_valid_kscene_bytes(1, 1);
+    KSceneHeader hdr{};
+    std::memcpy(&hdr, bytes.data(), sizeof(hdr));
+    KSceneNodeEntry n{};
+    std::memcpy(&n, bytes.data() + hdr.node_table_offset, sizeof(n));
+    n.material_index = 5;  // material_count is 0
+    std::memcpy(bytes.data() + hdr.node_table_offset, &n, sizeof(n));
+    EXPECT_EQ(parse_kscene_header(bytes.data(), bytes.size(), hdr),
+              ParseResult::BadMaterialIndex);
+}
+
+// ── KMaterial test helpers ──────────────────────────────────────
+
+namespace {
+// Build a known-valid .kmaterial blob: 108-byte header + a small
+// string table holding `diffuse_path_chars` for the diffuse slot.
+// All factor fields take spec-default values so tests can spot-check
+// that the parser preserves the bytes unchanged. Pass an empty
+// path to mark every texture slot as unused.
+std::vector<char> make_valid_kmaterial_bytes(const char* diffuse_path_chars) {
+    const size_t header_size = sizeof(KMaterialHeader);
+    const size_t path_len    = std::strlen(diffuse_path_chars);
+
+    std::vector<char> bytes(header_size + path_len, 0);
+
+    KMaterialHeader hdr{};
+    hdr.magic          = kMagicKMaterial;
+    hdr.version        = kKMaterialVersion;
+    hdr.flags          = 0;
+    hdr.alpha_mode     = kAlphaModeOpaque;
+    hdr.base_color[0]  = 1.0f;
+    hdr.base_color[1]  = 1.0f;
+    hdr.base_color[2]  = 1.0f;
+    hdr.base_color[3]  = 1.0f;
+    hdr.alpha_cutoff       = 0.5f;
+    hdr.metallic_factor    = 0.0f;
+    hdr.roughness_factor   = 1.0f;
+    hdr.normal_scale       = 1.0f;
+    hdr.occlusion_strength = 1.0f;
+    hdr.emissive_factor[0] = 0.0f;
+    hdr.emissive_factor[1] = 0.0f;
+    hdr.emissive_factor[2] = 0.0f;
+
+    if (path_len > 0) {
+        hdr.diffuse_path_offset = 0;
+        hdr.diffuse_path_length = static_cast<uint32_t>(path_len);
+    }
+    hdr.string_table_size = static_cast<uint32_t>(path_len);
+
+    std::memcpy(bytes.data(), &hdr, sizeof(hdr));
+    if (path_len > 0) {
+        std::memcpy(bytes.data() + header_size, diffuse_path_chars, path_len);
+    }
+    return bytes;
+}
+}  // namespace
+
+// ── KMaterial corruption matrix ─────────────────────────────────
+
+TEST(IntegrationAssetFormatKMaterial, ValidBytesParseOk) {
+    auto bytes = make_valid_kmaterial_bytes("0.ktex");
+    KMaterialHeader hdr{};
+    EXPECT_EQ(parse_kmaterial_header(bytes.data(), bytes.size(), hdr), ParseResult::Ok);
+    EXPECT_EQ(hdr.diffuse_path_length, 6u);
+    EXPECT_EQ(hdr.diffuse_path_offset, 0u);
+    EXPECT_EQ(hdr.alpha_mode, kAlphaModeOpaque);
+    EXPECT_FLOAT_EQ(hdr.roughness_factor, 1.0f);
+    EXPECT_FLOAT_EQ(hdr.metallic_factor,  0.0f);
+}
+
+TEST(IntegrationAssetFormatKMaterial, ValidWithoutDiffuseParsesOk) {
+    // No texture slots used. parser must still accept the file -
+    // this is the expected shape when a material has only a base
+    // color factor and no textures at all.
+    auto bytes = make_valid_kmaterial_bytes("");
+    KMaterialHeader hdr{};
+    EXPECT_EQ(parse_kmaterial_header(bytes.data(), bytes.size(), hdr), ParseResult::Ok);
+    EXPECT_EQ(hdr.diffuse_path_length, 0u);
+    EXPECT_EQ(hdr.string_table_size,   0u);
+}
+
+TEST(IntegrationAssetFormatKMaterial, EmptyBufferReportsTooSmall) {
+    KMaterialHeader hdr{};
+    EXPECT_EQ(parse_kmaterial_header(nullptr, 0, hdr), ParseResult::TooSmall);
+}
+
+TEST(IntegrationAssetFormatKMaterial, TruncatedHeaderReportsTooSmall) {
+    auto bytes = make_valid_kmaterial_bytes("0.ktex");
+    bytes.resize(sizeof(KMaterialHeader) - 1);
+    KMaterialHeader hdr{};
+    EXPECT_EQ(parse_kmaterial_header(bytes.data(), bytes.size(), hdr), ParseResult::TooSmall);
+}
+
+TEST(IntegrationAssetFormatKMaterial, BadMagicReportsBadMagic) {
+    auto bytes = make_valid_kmaterial_bytes("0.ktex");
+    KMaterialHeader hdr{};
+    std::memcpy(&hdr, bytes.data(), sizeof(hdr));
+    hdr.magic = 0xDEADBEEF;
+    std::memcpy(bytes.data(), &hdr, sizeof(hdr));
+    EXPECT_EQ(parse_kmaterial_header(bytes.data(), bytes.size(), hdr), ParseResult::BadMagic);
+}
+
+TEST(IntegrationAssetFormatKMaterial, WrongVersionReportsVersionMismatch) {
+    auto bytes = make_valid_kmaterial_bytes("0.ktex");
+    KMaterialHeader hdr{};
+    std::memcpy(&hdr, bytes.data(), sizeof(hdr));
+    hdr.version = kKMaterialVersion + 1;
+    std::memcpy(bytes.data(), &hdr, sizeof(hdr));
+    EXPECT_EQ(parse_kmaterial_header(bytes.data(), bytes.size(), hdr), ParseResult::VersionMismatch);
+}
+
+TEST(IntegrationAssetFormatKMaterial, UnknownAlphaModeReportsUnsupported) {
+    auto bytes = make_valid_kmaterial_bytes("0.ktex");
+    KMaterialHeader hdr{};
+    std::memcpy(&hdr, bytes.data(), sizeof(hdr));
+    hdr.alpha_mode = kAlphaModeMaxKnown + 1;
+    std::memcpy(bytes.data(), &hdr, sizeof(hdr));
+    EXPECT_EQ(parse_kmaterial_header(bytes.data(), bytes.size(), hdr),
+              ParseResult::UnsupportedFormat);
+}
+
+TEST(IntegrationAssetFormatKMaterial, KnownAlphaModesAllAccepted) {
+    for (uint32_t mode : {kAlphaModeOpaque, kAlphaModeMask, kAlphaModeBlend}) {
+        auto bytes = make_valid_kmaterial_bytes("0.ktex");
+        KMaterialHeader hdr{};
+        std::memcpy(&hdr, bytes.data(), sizeof(hdr));
+        hdr.alpha_mode = mode;
+        std::memcpy(bytes.data(), &hdr, sizeof(hdr));
+        EXPECT_EQ(parse_kmaterial_header(bytes.data(), bytes.size(), hdr), ParseResult::Ok)
+            << "alpha_mode " << mode << " should be accepted";
+    }
+}
+
+TEST(IntegrationAssetFormatKMaterial, StringTableTruncationReportsOffsetOutOfBounds) {
+    auto bytes = make_valid_kmaterial_bytes("0.ktex");
+    KMaterialHeader hdr{};
+    std::memcpy(&hdr, bytes.data(), sizeof(hdr));
+    // Claim a larger string table than the buffer holds.
+    hdr.string_table_size = 999;
+    std::memcpy(bytes.data(), &hdr, sizeof(hdr));
+    EXPECT_EQ(parse_kmaterial_header(bytes.data(), bytes.size(), hdr),
+              ParseResult::OffsetOutOfBounds);
+}
+
+TEST(IntegrationAssetFormatKMaterial, DiffusePathRunsPastStringTableReportsOffsetOutOfBounds) {
+    auto bytes = make_valid_kmaterial_bytes("0.ktex");
+    KMaterialHeader hdr{};
+    std::memcpy(&hdr, bytes.data(), sizeof(hdr));
+    // string_table_size stays 6 ("0.ktex"), but diffuse claims 100 bytes.
+    hdr.diffuse_path_length = 100;
+    std::memcpy(bytes.data(), &hdr, sizeof(hdr));
+    EXPECT_EQ(parse_kmaterial_header(bytes.data(), bytes.size(), hdr),
+              ParseResult::OffsetOutOfBounds);
+}
+
+TEST(IntegrationAssetFormatKMaterial, NormalPathOffsetPastStringTableReportsOffsetOutOfBounds) {
+    auto bytes = make_valid_kmaterial_bytes("0.ktex");
+    KMaterialHeader hdr{};
+    std::memcpy(&hdr, bytes.data(), sizeof(hdr));
+    // Set a non-zero length for normal but point past the string table.
+    hdr.normal_path_offset = 999;
+    hdr.normal_path_length = 1;
+    std::memcpy(bytes.data(), &hdr, sizeof(hdr));
+    EXPECT_EQ(parse_kmaterial_header(bytes.data(), bytes.size(), hdr),
+              ParseResult::OffsetOutOfBounds);
+}
+
+TEST(IntegrationAssetFormatKMaterial, ZeroLengthPathsIgnoreOffset) {
+    // length=0 marks "slot unused" and the parser must not bounds-
+    // check the offset for those entries. Stamp wild offsets into
+    // every unused slot to verify they're not validated.
+    auto bytes = make_valid_kmaterial_bytes("0.ktex");
+    KMaterialHeader hdr{};
+    std::memcpy(&hdr, bytes.data(), sizeof(hdr));
+    hdr.normal_path_offset             = 0xFFFFFFFF;
+    hdr.metallic_roughness_path_offset = 0xFFFFFFFF;
+    hdr.occlusion_path_offset          = 0xFFFFFFFF;
+    hdr.emissive_path_offset           = 0xFFFFFFFF;
+    std::memcpy(bytes.data(), &hdr, sizeof(hdr));
+    EXPECT_EQ(parse_kmaterial_header(bytes.data(), bytes.size(), hdr), ParseResult::Ok);
+}
+
+TEST(IntegrationAssetFormatKMaterial, MagicSpellsKMAT) {
+    // Hex of 'K' 'M' 'A' 'T' little-endian = 0x54414D4B.
+    EXPECT_EQ(kMagicKMaterial, 0x54414D4Bu);
+}
+
+TEST(IntegrationAssetFormatKMaterial, HeaderIs108Bytes) {
+    EXPECT_EQ(sizeof(KMaterialHeader), 108u);
 }
