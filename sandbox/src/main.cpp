@@ -83,8 +83,8 @@ kuma::EntityID spawn_physics_icosahedron(kuma::Registry& registry,
 int main() {
     kuma::EngineConfig config{};
     config.app_name = "Kuma Sandbox";
-    config.window_width = 1920;
-    config.window_height = 1080;
+    config.window_width = 3840;
+    config.window_height = 2160;
     config.present_mode = kuma::PresentMode::Vsync;
 
     if (!kuma::init(config)) {
