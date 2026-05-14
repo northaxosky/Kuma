@@ -94,6 +94,45 @@ protected:
 
 }  // namespace
 
+TEST_F(IntegrationAudio, PlayingMultipleSoundsWhileOneLoopsDoesNotCrash) {
+    // Regression for a real crash where std::vector<InstanceRecord>
+    // reallocated on growth, invalidating the raw pointers miniaudio
+    // had stored to per-instance ma_audio_buffer_ref / ma_decoder
+    // structs. With a long-running looping sound active, allocating
+    // a second slot would move the first and the audio thread would
+    // dereference dangling memory. Now uses std::deque so already-
+    // running instances keep stable addresses across growth.
+
+    const auto path = bake_test_sound("multi_grow");
+    const auto* sound = kuma::audio::load_sound(path.string().c_str());
+    ASSERT_NE(sound, nullptr);
+
+    kuma::Registry registry;
+    kuma::EntityID e = registry.create_entity();
+    kuma::AudioSource src;
+    src.sound = sound;
+    src.spatial = false;
+    src.looping = true;
+    registry.add(e, src);
+    kuma::audio::simulate(registry);  // start the looping ambient
+
+    // Now fire several one-shots in a row - each forces a potential
+    // grow of the instance container while the looper is mid-play.
+    for (int i = 0; i < 10; ++i) {
+        auto h = kuma::audio::play_sound(sound);
+        EXPECT_TRUE(h.valid()) << "play_sound failed on iteration " << i;
+    }
+
+    // The looping source must still be alive and pointing at the
+    // same record - if growth had moved it, ma_sound's internal data
+    // source pointer would now be dangling and any subsequent
+    // simulate / lookup would either crash or report it as gone.
+    kuma::audio::simulate(registry);
+    const auto& src_after = registry.get<kuma::AudioSource>(e);
+    EXPECT_TRUE(src_after.created);
+    EXPECT_TRUE(src_after.playing);
+}
+
 TEST_F(IntegrationAudio, PlayingCountStartsZero) {
     EXPECT_EQ(kuma::audio::playing_count(), 0u);
 }

@@ -8,6 +8,7 @@
 #include <kuma/audio.h>
 
 #include <algorithm>
+#include <deque>
 #include <fstream>
 #include <memory>
 #include <string>
@@ -71,7 +72,16 @@ struct State {
     // the free list or grow; the validate-alive sweep + finished-sound
     // pruner free entries back. SoundHandle.index points into here,
     // SoundHandle.generation matches the record's generation.
-    std::vector<InstanceRecord> instances;
+    //
+    // CRITICAL: this is a deque, NOT a vector. miniaudio's ma_sound
+    // and ma_decoder structs internally store raw pointers to the
+    // ma_audio_buffer_ref / ma_decoder we pass them. If a vector
+    // relocated on growth, every already-running sound would suddenly
+    // be reading freed memory through those internal pointers and
+    // the audio thread would crash. Deque grows in chunks without
+    // ever moving existing elements, so the addresses stay stable
+    // for the entire instance lifetime.
+    std::deque<InstanceRecord> instances;
     std::vector<uint32_t> free_slots;
     uint32_t live_count = 0;
 
