@@ -19,10 +19,12 @@ namespace kuma::asset_format {
 inline constexpr uint32_t kMagicKMesh  = 0x48534D4B;  // 'KMSH'
 inline constexpr uint32_t kMagicKTex   = 0x5845544B;  // 'KTEX'
 inline constexpr uint32_t kMagicKSound = 0x444E534B;  // 'KSND'
+inline constexpr uint32_t kMagicKScene = 0x4E43534B;  // 'KSCN'
 
 inline constexpr uint32_t kKMeshVersion  = 1;
 inline constexpr uint32_t kKTexVersion   = 1;
 inline constexpr uint32_t kKSoundVersion = 1;
+inline constexpr uint32_t kKSceneVersion = 1;
 
 // ── Texture pixel formats ───────────────────────────────────────
 inline constexpr uint32_t kFormatRGBA8 = 1;
@@ -93,6 +95,56 @@ struct KSoundHeader {
 static_assert(sizeof(KSoundHeader) == 32,
               "KSoundHeader layout must match tools/kuma-bake/src/format.rs");
 
+// ── KScene header ───────────────────────────────────────────────
+// Multi-mesh scene asset. Layout:
+//   header (32 bytes)
+//   mesh table  (mesh_count entries, KSceneMeshEntry each)
+//   node table  (node_count entries, KSceneNodeEntry each)
+//   string table (variable length, packed utf-8 paths)
+//
+// All offsets are byte offsets from the start of the file. Mesh
+// paths are stored in the string table and resolved at runtime
+// relative to the .kscene's own directory; absolute paths and
+// "../" traversal are rejected by the loader for safety.
+struct KSceneHeader {
+    uint32_t magic;
+    uint32_t version;
+    uint32_t mesh_count;
+    uint32_t node_count;
+    uint32_t mesh_table_offset;
+    uint32_t node_table_offset;
+    uint32_t string_table_offset;
+    uint32_t string_table_size;
+};
+static_assert(sizeof(KSceneHeader) == 32,
+              "KSceneHeader layout must match tools/kuma-bake/src/format.rs");
+
+// One per unique mesh referenced by the scene. Stores a path into
+// the string table; the path is relative to the .kscene's directory.
+struct KSceneMeshEntry {
+    uint32_t path_offset;  // byte offset into string table (RELATIVE to its start)
+    uint32_t path_length;  // byte length of the path
+};
+static_assert(sizeof(KSceneMeshEntry) == 8,
+              "KSceneMeshEntry layout must match tools/kuma-bake/src/format.rs");
+
+// One per renderable node. mesh_index == kSceneNoMesh marks a
+// node with no geometry; the loader currently discards those at
+// bake time, but the constant exists so a future format that
+// keeps named-marker nodes can use it.
+inline constexpr uint32_t kSceneNoMesh = 0xFFFFFFFFu;
+
+// transform is a 4x4 column-major matrix already composed with
+// the parent chain - the runtime applies it directly to the
+// entity's Transform without walking any hierarchy.
+struct KSceneNodeEntry {
+    uint32_t mesh_index;
+    uint32_t reserved;
+    float    transform[16];
+};
+static_assert(sizeof(KSceneNodeEntry) == 72,
+              "KSceneNodeEntry layout must match tools/kuma-bake/src/format.rs");
+
 // ── Pure parsers (no I/O, no third-party libs) ──────────────────
 // Validate the header + slice layout of an in-memory .kmesh /
 // .ktex blob. Engine loaders call these before doing any GPU
@@ -118,10 +170,12 @@ enum class ParseResult {
     BadChannels,        // (KSound) channels != 1 and != 2
     BadFrameCount,      // (KSound) PCM frame_count == 0 OR compressed frame_count != 0
     PayloadSizeMismatch,// (KSound) PCM payload_size != frame_count * channels * 4
+    BadMeshIndex,       // (KScene) node references a mesh_index >= mesh_count
 };
 
 ParseResult parse_kmesh_header(const void* data, size_t size, KMeshHeader& out_header);
 ParseResult parse_ktex_header(const void* data, size_t size, KTexHeader& out_header);
 ParseResult parse_ksound_header(const void* data, size_t size, KSoundHeader& out_header);
+ParseResult parse_kscene_header(const void* data, size_t size, KSceneHeader& out_header);
 
 }  // namespace kuma::asset_format

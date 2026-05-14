@@ -133,4 +133,64 @@ ParseResult parse_ksound_header(const void* data, size_t size, KSoundHeader& out
     return ParseResult::Ok;
 }
 
+ParseResult parse_kscene_header(const void* data, size_t size, KSceneHeader& out_header) {
+    if (size < sizeof(KSceneHeader)) return ParseResult::TooSmall;
+
+    std::memcpy(&out_header, data, sizeof(out_header));
+
+    if (out_header.magic != kMagicKScene) return ParseResult::BadMagic;
+    if (out_header.version != kKSceneVersion) return ParseResult::VersionMismatch;
+
+    // Mesh table fits within buffer.
+    if (would_overflow(out_header.mesh_count, sizeof(KSceneMeshEntry))) {
+        return ParseResult::PayloadOverflow;
+    }
+    const size_t mesh_table_bytes =
+        static_cast<size_t>(out_header.mesh_count) * sizeof(KSceneMeshEntry);
+    if (out_header.mesh_table_offset > size ||
+        mesh_table_bytes > size - out_header.mesh_table_offset) {
+        return ParseResult::OffsetOutOfBounds;
+    }
+
+    // Node table fits within buffer.
+    if (would_overflow(out_header.node_count, sizeof(KSceneNodeEntry))) {
+        return ParseResult::PayloadOverflow;
+    }
+    const size_t node_table_bytes =
+        static_cast<size_t>(out_header.node_count) * sizeof(KSceneNodeEntry);
+    if (out_header.node_table_offset > size ||
+        node_table_bytes > size - out_header.node_table_offset) {
+        return ParseResult::OffsetOutOfBounds;
+    }
+
+    // String table fits within buffer.
+    if (out_header.string_table_offset > size ||
+        out_header.string_table_size > size - out_header.string_table_offset) {
+        return ParseResult::OffsetOutOfBounds;
+    }
+
+    // Per-mesh path entries must point inside the string table.
+    const auto* mesh_entries = reinterpret_cast<const KSceneMeshEntry*>(
+        static_cast<const std::uint8_t*>(data) + out_header.mesh_table_offset);
+    for (uint32_t i = 0; i < out_header.mesh_count; ++i) {
+        const KSceneMeshEntry& m = mesh_entries[i];
+        if (m.path_offset > out_header.string_table_size ||
+            m.path_length > out_header.string_table_size - m.path_offset) {
+            return ParseResult::OffsetOutOfBounds;
+        }
+    }
+
+    // Per-node mesh_index must be valid (or the explicit no-mesh sentinel).
+    const auto* node_entries = reinterpret_cast<const KSceneNodeEntry*>(
+        static_cast<const std::uint8_t*>(data) + out_header.node_table_offset);
+    for (uint32_t i = 0; i < out_header.node_count; ++i) {
+        const KSceneNodeEntry& n = node_entries[i];
+        if (n.mesh_index != kSceneNoMesh && n.mesh_index >= out_header.mesh_count) {
+            return ParseResult::BadMeshIndex;
+        }
+    }
+
+    return ParseResult::Ok;
+}
+
 }  // namespace kuma::asset_format

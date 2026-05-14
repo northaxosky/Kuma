@@ -14,6 +14,7 @@
 #include <kuma/platform.h>
 #include <kuma/renderer.h>
 #include <kuma/resource_manager.h>
+#include <kuma/scene.h>
 #include <kuma/time.h>
 #include <kuma/transform.h>
 #include <kuma/window.h>
