@@ -4,8 +4,10 @@
 // Game code only needs: #include <kuma/kuma.h>
 
 #include <kuma/camera.h>
+#include <kuma/character.h>
 #include <kuma/debug.h>
 #include <kuma/ecs.h>
+#include <kuma/fps_camera.h>
 #include <kuma/input.h>
 #include <kuma/physics.h>
 #include <kuma/platform.h>

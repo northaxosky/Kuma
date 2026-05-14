@@ -24,6 +24,7 @@
 
 #include "physics/jolt_globals.h"
 #include "physics/layers.h"
+#include "physics/native_context.h"
 
 namespace kuma::physics {
 
@@ -131,6 +132,12 @@ struct State {
     std::unique_ptr<detail::KumaObjectPairFilter> object_pair_filter;
     std::unique_ptr<JPH::PhysicsSystem> system;
     BodyStore bodies;
+
+    // Bundle of raw pointers handed out via native_context() so
+    // sibling modules can drive their own Jolt-backed simulations
+    // (CharacterVirtual, etc.) against the shared PhysicsSystem
+    // without us re-exporting every individual handle.
+    detail::PhysicsNativeContext native;
 
     // Fixed-step accumulator. Drained inside simulate() at config.fixed_step
     // intervals, capped by max_steps_per_frame to prevent spiral-of-death.
@@ -359,6 +366,14 @@ bool init(const PhysicsConfig& config) {
     state->system->SetGravity(
         JPH::Vec3(config.gravity.x, config.gravity.y, config.gravity.z));
 
+    // Populate the cross-module bridge AFTER all owners exist so the
+    // pointers are stable for the lifetime of the module.
+    state->native.system = state->system.get();
+    state->native.temp_allocator = state->temp_allocator.get();
+    state->native.broad_phase_layer_interface = state->bp_layer_interface.get();
+    state->native.object_vs_broad_phase_filter = state->object_vs_bp_filter.get();
+    state->native.object_layer_pair_filter = state->object_pair_filter.get();
+
     g_state = state.release();
 
     kuma::log::info(
@@ -480,6 +495,16 @@ void destroy_entity(Registry& registry, EntityID e) {
 uint32_t body_count() {
     if (g_state == nullptr) return 0;
     return g_state->bodies.live_count();
+}
+
+Vec3 gravity() {
+    if (g_state == nullptr) return {};
+    return g_state->config.gravity;
+}
+
+void* native_context() {
+    if (g_state == nullptr) return nullptr;
+    return &g_state->native;
 }
 
 }  // namespace kuma::physics

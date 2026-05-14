@@ -187,5 +187,22 @@ void destroy_entity(Registry& registry, EntityID e);
 // Useful for debug overlays and stress-test caps.
 uint32_t body_count();
 
+// World gravity vector, in m/s^2 along each axis. Set at init via
+// PhysicsConfig and immutable thereafter. Kuma uses {0, -9.81, 0}
+// by default; other modules read this so gameplay gravity stays
+// consistent with the simulation.
+Vec3 gravity();
+
+// ── Cross-module backend access ─────────────────────────────────
+// Returned pointer is opaque - the layout is private to the
+// physics implementation. Kuma modules that build on top of Jolt
+// (e.g. character controllers) cast it back to the real type
+// internally. Game code MUST NOT use this; treat it as a private
+// engine-internal handshake.
+//
+// Pointer is owned by the physics module and remains valid until
+// physics::shutdown(). nullptr if physics is not initialized.
+void* native_context();
+
 }  // namespace physics
 }  // namespace kuma

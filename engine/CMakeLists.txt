@@ -15,6 +15,8 @@ target_sources(kuma-engine PRIVATE
     src/core/transform.cpp
     src/physics/jolt_globals.cpp
     src/physics/physics.cpp
+    src/character/character.cpp
+    src/character/fps_camera.cpp
     src/platform/input.cpp
     src/platform/paths.cpp
     src/platform/window.cpp
