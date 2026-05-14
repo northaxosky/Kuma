@@ -63,3 +63,16 @@ function(kuma_bake_gltf INPUT_GLTF)
     set_property(GLOBAL APPEND PROPERTY KUMA_BAKED_FILES ${OUTPUT})
     set(KUMA_BAKED_${BASE} ${OUTPUT} PARENT_SCOPE)
 endfunction()
+
+function(kuma_bake_sound INPUT_SOUND)
+    get_filename_component(BASE ${INPUT_SOUND} NAME_WE)
+    set(OUTPUT ${CMAKE_BINARY_DIR}/assets/sounds/${BASE}.ksound)
+    add_custom_command(
+        OUTPUT ${OUTPUT}
+        COMMAND ${KUMA_BAKE_EXE} sound ${INPUT_SOUND} ${OUTPUT}
+        DEPENDS ${INPUT_SOUND} kuma-bake-build
+        COMMENT "Baking sound: ${BASE} -> ${BASE}.ksound"
+    )
+    set_property(GLOBAL APPEND PROPERTY KUMA_BAKED_FILES ${OUTPUT})
+    set(KUMA_BAKED_${BASE} ${OUTPUT} PARENT_SCOPE)
+endfunction()

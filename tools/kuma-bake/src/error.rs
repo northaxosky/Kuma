@@ -25,6 +25,9 @@ pub enum BakeError {
     #[error("glTF parse failed: {0}")]
     Gltf(#[from] gltf::Error),
 
+    #[error("audio decode failed: {0}")]
+    Audio(#[from] symphonia::core::errors::Error),
+
     #[error("invalid input: {0}")]
     Invalid(String),
 }

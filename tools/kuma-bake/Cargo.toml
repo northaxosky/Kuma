@@ -12,6 +12,7 @@ clap = { version = "4", features = ["derive"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tga"] }
 tobj = "4"
 gltf = { version = "1", default-features = false, features = ["import", "utils", "names"] }
+symphonia = { version = "0.5", default-features = false, features = ["wav", "pcm", "ogg", "vorbis"] }
 bytemuck = { version = "1", features = ["derive"] }
 thiserror = "1"
 

@@ -24,15 +24,18 @@ enum Command {
     Tex { input: PathBuf, output: PathBuf },
     /// Convert a glTF / GLB mesh into a .kmesh binary
     Gltf { input: PathBuf, output: PathBuf },
+    /// Convert a .wav (decoded to PCM) or .ogg (passthrough) into a .ksound binary
+    Sound { input: PathBuf, output: PathBuf },
 }
 
 fn main() -> ExitCode {
     let cli: Cli = Cli::parse();
 
     let result: Result<(), kuma_bake::BakeError> = match cli.command {
-        Command::Mesh { input, output } => kuma_bake::bake_mesh(&input, &output),
-        Command::Tex  { input, output } => kuma_bake::bake_texture(&input, &output),
-        Command::Gltf { input, output } => kuma_bake::bake_gltf(&input, &output),
+        Command::Mesh  { input, output } => kuma_bake::bake_mesh(&input, &output),
+        Command::Tex   { input, output } => kuma_bake::bake_texture(&input, &output),
+        Command::Gltf  { input, output } => kuma_bake::bake_gltf(&input, &output),
+        Command::Sound { input, output } => kuma_bake::bake_sound(&input, &output),
     };
 
     match result {

@@ -17,16 +17,29 @@ use bytemuck::{Pod, Zeroable};
 // ── Magic codes ─────────────────────────────────────────────────
 // 4 ASCII bytes that identify the file type. Visible in a hex dump.
 
-pub const MAGIC_KMESH: [u8; 4] = *b"KMSH";
-pub const MAGIC_KTEX:  [u8; 4] = *b"KTEX";
+pub const MAGIC_KMESH:  [u8; 4] = *b"KMSH";
+pub const MAGIC_KTEX:   [u8; 4] = *b"KTEX";
+pub const MAGIC_KSOUND: [u8; 4] = *b"KSND";
 
-pub const KMESH_VERSION: u32 = 1;
-pub const KTEX_VERSION:  u32 = 1;
+pub const KMESH_VERSION:  u32 = 1;
+pub const KTEX_VERSION:   u32 = 1;
+pub const KSOUND_VERSION: u32 = 1;
 
 // ── Texture pixel formats ───────────────────────────────────────
 // Only RGBA8 in v1; compression formats (BC7, BC5) arrive later.
 
 pub const FORMAT_RGBA8: u32 = 1;
+
+// ── Audio payload formats ───────────────────────────────────────
+// PCM: raw IEEE-754 float32 samples, little-endian, interleaved
+// frame-major (mono = M M M, stereo = L R L R), frame_count meaningful.
+// Compressed: original encoded bytes are written as-is and decoded
+// at runtime by miniaudio; frame_count is 0.
+
+pub const AUDIO_FORMAT_PCM_F32: u32 = 0;
+pub const AUDIO_FORMAT_OGG:     u32 = 1;
+pub const AUDIO_FORMAT_MP3:     u32 = 2;
+pub const AUDIO_FORMAT_FLAC:    u32 = 3;
 
 // ── Vertex ──────────────────────────────────────────────────────
 // Per-vertex layout consumed by the engine's Vulkan vertex input.
@@ -74,6 +87,24 @@ pub struct KTexHeader {
     pub _reserved:    [u32; 2],
 }
 
+// ── KSound header ───────────────────────────────────────────────
+// 32-byte header at the start of every `.ksound` file. PCM payload:
+// `frame_count * channels` IEEE-754 f32 samples, little-endian,
+// interleaved. Compressed payload: original encoded bytes.
+
+#[repr(C)]
+#[derive(Pod, Zeroable, Copy, Clone, Debug)]
+pub struct KSoundHeader {
+    pub magic:          [u8; 4],
+    pub version:        u32,
+    pub format:         u32,  // AUDIO_FORMAT_*
+    pub sample_rate:    u32,
+    pub channels:       u32,  // 1 or 2
+    pub frame_count:    u32,  // frames per channel for PCM, 0 for compressed
+    pub payload_offset: u32,
+    pub payload_size:   u32,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -93,6 +124,7 @@ mod tests {
         // payload offsets relative to it.
         assert_eq!(size_of::<KMeshHeader>(), 32);
         assert_eq!(size_of::<KTexHeader>(), 32);
+        assert_eq!(size_of::<KSoundHeader>(), 32);
     }
 
     #[test]
@@ -100,8 +132,9 @@ mod tests {
         // Sanity check: hex dump of a .kmesh starts with `4B 4D 53 48`,
         // which spells `KMSH` in ASCII. Catches accidental endian
         // confusion if someone reorders the bytes.
-        assert_eq!(&MAGIC_KMESH, b"KMSH");
-        assert_eq!(&MAGIC_KTEX,  b"KTEX");
+        assert_eq!(&MAGIC_KMESH,  b"KMSH");
+        assert_eq!(&MAGIC_KTEX,   b"KTEX");
+        assert_eq!(&MAGIC_KSOUND, b"KSND");
     }
 
     #[test]
