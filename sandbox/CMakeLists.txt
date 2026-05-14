@@ -22,10 +22,12 @@ add_custom_command(TARGET sandbox POST_BUILD
 
 # Bake source assets into the engine binary format. Each helper
 # adds a custom command that runs kuma-bake whenever the source
-# file changes; the outputs land in build/assets/{models,textures}/.
+# file changes; the outputs land in build/assets/{models,textures,sounds}/.
 kuma_bake_mesh(${CMAKE_SOURCE_DIR}/assets/source/models/quad.obj)
 kuma_bake_gltf(${CMAKE_SOURCE_DIR}/assets/source/models/icosahedron.glb)
 kuma_bake_texture(${CMAKE_SOURCE_DIR}/assets/source/textures/VaultBoyNV.png)
+kuma_bake_sound(${CMAKE_SOURCE_DIR}/assets/source/sounds/thud.wav)
+kuma_bake_sound(${CMAKE_SOURCE_DIR}/assets/source/sounds/ambient.wav)
 
 # Roll every baked asset into a single ALL target so they all
 # build as part of cmake --build, then make sandbox depend on it.

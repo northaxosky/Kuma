@@ -46,15 +46,17 @@ void render_system(kuma::Registry& registry, kuma::Renderer& renderer) {
 // camera. Gravity does the rest. The icosahedron mesh is rendered
 // over a sphere collider - close enough for the visual demo.
 kuma::EntityID spawn_physics_icosahedron(kuma::Registry& registry,
-                                          const kuma::Camera& camera) {
+                                          const kuma::Camera& camera,
+                                          const kuma::audio::Sound* thud) {
     constexpr float kSpawnDistance = 3.0f;
     constexpr float kRadius = 0.3f;
 
     kuma::EntityID e = registry.create_entity();
 
+    const kuma::Vec3 spawn_pos = camera.position() + camera.forward() * kSpawnDistance;
     kuma::Transform t;
-    t.set_position(camera.position() + camera.forward() * kSpawnDistance);
-    t.set_scale(kRadius * 2.0f);  // icosahedron mesh is unit-sized
+    t.set_position(spawn_pos);
+    t.set_scale(kRadius * 2.0f);
     registry.add(e, t);
 
     kuma::physics::PhysicsBody body;
@@ -67,6 +69,12 @@ kuma::EntityID spawn_physics_icosahedron(kuma::Registry& registry,
     registry.add(e, body);
 
     registry.add(e, SpawnedTag{});
+
+    // Punchy spawn cue - the thud plays from the spawn position so
+    // it fades correctly with distance and pans based on the listener.
+    if (thud != nullptr) {
+        kuma::audio::play_sound_at(thud, spawn_pos);
+    }
     return e;
 }
 
@@ -167,6 +175,28 @@ int main() {
         registry.add(player, c);
     }
 
+    // ── Audio assets ────────────────────────────────────────────
+    // thud.wav is a short impact cue baked to PCM; ambient.wav is a
+    // longer chord pad that loops as background music. Both go
+    // through the same kuma::audio API; the difference is only that
+    // the music sits on an AudioSource component with looping=true
+    // while the thud is fired immediate-mode on every spawn.
+    const auto* thud_sound = kuma::audio::load_sound(
+        kuma::platform::exe_relative("assets/sounds/thud.ksound").c_str());
+    const auto* ambient_sound = kuma::audio::load_sound(
+        kuma::platform::exe_relative("assets/sounds/ambient.ksound").c_str());
+
+    if (ambient_sound != nullptr) {
+        kuma::EntityID music = registry.create_entity();
+        kuma::AudioSource src;
+        src.sound = ambient_sound;
+        src.spatial = false;        // music ignores listener position
+        src.looping = true;
+        src.volume = 0.4f;
+        src.play_on_create = true;
+        registry.add(music, src);
+    }
+
     constexpr uint32_t kMaxSpawned = 200;
     std::vector<kuma::EntityID> spawned;
 
@@ -214,7 +244,7 @@ int main() {
         // F spawns an icosahedron in front of the camera. Spawn is
         // capped so the body pool can't exhaust accidentally.
         if (kuma::input::was_key_pressed(kuma::Key::F) && spawned.size() < kMaxSpawned) {
-            spawned.push_back(spawn_physics_icosahedron(registry, camera));
+            spawned.push_back(spawn_physics_icosahedron(registry, camera, thud_sound));
         }
 
         // R wipes every spawned body. destroy_entity routes through
@@ -233,6 +263,14 @@ int main() {
         const float dt = kuma::time::delta();
         kuma::character::simulate(dt, registry);
         kuma::physics::simulate(dt, registry);
+
+        // Audio listener follows the camera; world-up for the up
+        // vector (NOT camera.up()) so looking down doesn't roll the
+        // perceived audio scene around the listener.
+        kuma::audio::set_listener_pose(camera.position(),
+                                        camera.forward(),
+                                        {0.0f, 1.0f, 0.0f});
+        kuma::audio::simulate(registry);
 
         // Run gameplay systems in declared order.
         spin_system(registry, kuma::time::total());
@@ -283,6 +321,11 @@ int main() {
                 ImGui::Text("Bodies:    %u", kuma::physics::body_count());
                 ImGui::Text("Spawned:   %zu / %u", spawned.size(), kMaxSpawned);
                 ImGui::TextDisabled("F to spawn, R to reset, T to toggle Fly");
+
+                kuma::debug::section_header("Audio");
+                ImGui::Text("Playing:   %u", kuma::audio::playing_count());
+                ImGui::Text("Thud:      %s", thud_sound ? "loaded" : "missing");
+                ImGui::Text("Ambient:   %s", ambient_sound ? "loaded" : "missing");
             }
             ImGui::End();
         }
