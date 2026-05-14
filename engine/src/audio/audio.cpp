@@ -18,6 +18,7 @@
 
 #include <kuma/asset_format.h>
 #include <kuma/log.h>
+#include <kuma/transform.h>
 
 namespace kuma::audio {
 
@@ -399,12 +400,100 @@ void set_listener_pose(const Vec3& position, const Vec3& forward, const Vec3& up
 
 // ── Per-frame ───────────────────────────────────────────────────
 
-void simulate(Registry& /*registry*/) {
+namespace {
+
+// Walk every live AudioSource component:
+//   - lazy-create the playing instance the first time we see it
+//     (and start it if play_on_create is set)
+//   - sync mutable runtime state (volume, looping, spatial position)
+//     into the live ma_sound so post-create edits actually take
+//     effect; immutable params (sound, spatial) are frozen at create
+//   - flip Character.playing to reflect the current instance state
+void sync_component(EntityID entity, AudioSource& src, const Transform* transform) {
+    if (g_state == nullptr) return;
+
+    // Lazy create.
+    if (!src.created) {
+        if (src.sound == nullptr) return;
+        if (src.spatial && transform == nullptr) {
+            kuma::log::warn(
+                "audio: spatial AudioSource on entity %u is missing Transform; skipping",
+                entity.id);
+            return;
+        }
+
+        SoundHandle handle{};
+        InstanceRecord* rec = allocate_instance(handle);
+
+        if (ma_sound_init_copy(&g_state->engine,
+                                const_cast<ma_sound*>(&src.sound->template_sound),
+                                /*flags=*/0,
+                                /*group=*/nullptr,
+                                &rec->sound) != MA_SUCCESS) {
+            kuma::log::error("audio: ma_sound_init_copy failed for AudioSource on entity %u",
+                              entity.id);
+            free_instance(handle.index);
+            return;
+        }
+        rec->sound_inited = true;
+
+        ma_sound_set_spatialization_enabled(&rec->sound, src.spatial ? MA_TRUE : MA_FALSE);
+        if (src.spatial && transform != nullptr) {
+            const Vec3& p = transform->position();
+            ma_sound_set_position(&rec->sound, p.x, p.y, p.z);
+        }
+        ma_sound_set_volume(&rec->sound, src.volume);
+        ma_sound_set_looping(&rec->sound, src.looping ? MA_TRUE : MA_FALSE);
+
+        if (src.play_on_create) {
+            if (ma_sound_start(&rec->sound) != MA_SUCCESS) {
+                kuma::log::error("audio: ma_sound_start failed for AudioSource on entity %u",
+                                  entity.id);
+                free_instance(handle.index);
+                return;
+            }
+        }
+
+        src.handle = handle;
+        src.created = true;
+        src.playing = src.play_on_create;
+        return;
+    }
+
+    // Existing instance: sync mutable state. Looking up by handle
+    // catches the case where the instance was already pruned (sound
+    // finished naturally) - we mark playing=false and bail.
+    InstanceRecord* rec = lookup_instance(src.handle);
+    if (rec == nullptr) {
+        src.playing = false;
+        return;
+    }
+
+    if (src.spatial && transform != nullptr) {
+        const Vec3& p = transform->position();
+        ma_sound_set_position(&rec->sound, p.x, p.y, p.z);
+    }
+    ma_sound_set_volume(&rec->sound, src.volume);
+    ma_sound_set_looping(&rec->sound, src.looping ? MA_TRUE : MA_FALSE);
+
+    src.playing = ma_sound_is_playing(&rec->sound) == MA_TRUE;
+}
+
+// Drop instances whose owning entity is gone or whose AudioSource
+// component was removed. Mirrors the validate-alive sweep in physics
+// and character; matches by record entity tracking once we add it.
+// For now we have no entity-back-ref on InstanceRecord (immediate
+// play paths never had one), so the sweep iterates the registry side
+// instead and clears component handles whose entity is stale via
+// the natural lookup_instance check inside sync_component.
+}  // namespace
+
+void simulate(Registry& registry) {
     if (g_state == nullptr) return;
 
     // Prune one-shots that finished naturally. Walk the records by
-    // index so later passes (validate-alive on AudioSource components)
-    // can also work index-based and not race the iteration.
+    // index so component sync below can also work index-based and
+    // not race the iteration.
     for (uint32_t i = 0; i < g_state->instances.size(); ++i) {
         InstanceRecord& rec = g_state->instances[i];
         if (!rec.in_use) continue;
@@ -413,13 +502,36 @@ void simulate(Registry& /*registry*/) {
         }
     }
 
-    // AudioSource component sync arrives in the next commit.
+    // Spatial AudioSources need a Transform; iterate that view first.
+    for (auto [entity, src, transform] : registry.view<AudioSource, Transform>()) {
+        if (!src.spatial && src.created) continue;  // non-spatial: handled below
+        sync_component(entity, src, &transform);
+    }
+
+    // Non-spatial AudioSources don't require a Transform - iterate
+    // the single-component view to pick up music / UI sources whose
+    // entities are pure-audio.
+    for (auto [entity, src] : registry.view<AudioSource>()) {
+        if (src.spatial) continue;  // already handled above
+        sync_component(entity, src, nullptr);
+    }
 }
 
 // ── Lifecycle helpers (component) ───────────────────────────────
 
-void remove_source(Registry& /*registry*/, EntityID /*e*/) {
-    // Real implementation arrives with the AudioSource sync commit.
+void remove_source(Registry& registry, EntityID e) {
+    if (g_state == nullptr) return;
+    AudioSource* src = registry.try_get<AudioSource>(e);
+    if (src == nullptr) return;
+    if (src->created) {
+        InstanceRecord* rec = lookup_instance(src->handle);
+        if (rec != nullptr) {
+            free_instance(src->handle.index);
+        }
+        src->handle = {};
+        src->created = false;
+        src->playing = false;
+    }
 }
 
 void destroy_entity(Registry& registry, EntityID e) {
