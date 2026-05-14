@@ -94,6 +94,15 @@ public:
         } kEnabledPairs[] = {
             {PhysicsLayer::StaticWorld, PhysicsLayer::Dynamic},
             {PhysicsLayer::Dynamic,     PhysicsLayer::Dynamic},
+            // Character controllers (Player layer) collide with the
+            // world and with rigid dynamics so the capsule walks on
+            // floors and pushes physics bodies. Player-vs-Player
+            // collision is intentionally disabled - CharacterVirtual
+            // instances are not regular bodies and rely on Jolt's
+            // CharacterVsCharacterCollision system for that, which
+            // is not wired up here.
+            {PhysicsLayer::StaticWorld, PhysicsLayer::Player},
+            {PhysicsLayer::Dynamic,     PhysicsLayer::Player},
         };
         for (const auto& pair : kEnabledPairs) {
             const auto i = static_cast<size_t>(pair.a);
