@@ -16,6 +16,10 @@ struct RenderTag {};
 // decorative spinner alone.
 struct SpawnedTag {};
 
+// Sandbox can swap between an FPS character controller and the
+// existing free-fly camera for debug inspection. T toggles.
+enum class CameraMode { Fps, Fly };
+
 // Spin every grid quad around the +Y axis. Plain free function over
 // a two-component view - the SpawnedTag filter skips the runtime
 // icosahedrons so physics owns their rotations.
@@ -84,11 +88,16 @@ int main() {
                            static_cast<float>(config.window_width) /
                                static_cast<float>(config.window_height),
                            0.1f, 100.0f);
-    // Pull the camera back so the whole 10x10 grid is in frame.
-    camera.set_position({0.0f, 0.0f, 18.0f});
+    // Lift the fly-mode start a bit above the floor so the player
+    // can survey the scene before dropping into the FPS body.
+    camera.set_position({0.0f, 4.0f, 18.0f});
 
-    kuma::FreeFlyCameraController camera_controller;
-    camera_controller.mouse_sensitivity = 0.0025f;
+    kuma::FreeFlyCameraController fly_controller;
+    fly_controller.mouse_sensitivity = 0.0025f;
+    kuma::FpsCameraController fps_controller;
+    fps_controller.mouse_sensitivity = 0.0025f;
+
+    CameraMode mode = CameraMode::Fps;
 
     // Load the glTF icosahedron alongside the engine's default quad
     // mesh. We render it once per frame in front of the ECS quad
@@ -128,8 +137,7 @@ int main() {
 
     // ── Physics scene: invisible static floor ────────────────────
     // Sits a comfortable distance below the camera so spawned bodies
-    // have somewhere to land. No render tag, no mesh, no draw - the
-    // floor exists only as a collision plane for the simulation.
+    // and the player character have somewhere to land.
     constexpr float kFloorY = -8.0f;
     constexpr float kFloorHalfExtents = 30.0f;
     {
@@ -146,13 +154,31 @@ int main() {
         registry.add(floor, body);
     }
 
+    // ── Player character ────────────────────────────────────────
+    // Spawn just above the floor so the controller settles in one
+    // frame. The Character struct's defaults (1.8m capsule, 5 m/s
+    // walk, 5.5 m/s jump) match a typical FPS player.
+    kuma::EntityID player = registry.create_entity();
+    {
+        kuma::Transform t;
+        t.set_position({0.0f, kFloorY + 2.0f, 12.0f});  // in front of the grid
+        registry.add(player, t);
+        kuma::Character c;
+        registry.add(player, c);
+    }
+
     constexpr uint32_t kMaxSpawned = 200;
     std::vector<kuma::EntityID> spawned;
 
     kuma::log::info(
         "Sandbox ready: %d quads + glTF spinner + physics floor at y=%.1f. "
-        "F spawns icosahedron, R clears them. WASD/QE/RMB to fly.",
+        "WASD walk, Space jump, mouse look. T to toggle Fly mode (debug). "
+        "F spawns icosahedron, R clears them.",
         kGridSize * kGridSize, kFloorY);
+
+    // FPS mode wants the cursor captured for relative mouse motion.
+    // Fly mode keeps the existing RMB-hold-to-look behavior.
+    kuma::get_window().set_relative_mouse_mode(true);
 
     while (kuma::begin_frame()) {
         if (kuma::input::was_key_pressed(kuma::Key::Escape)) {
@@ -161,14 +187,28 @@ int main() {
             break;
         }
 
-        if (kuma::input::was_mouse_button_pressed(kuma::MouseButton::Right)) {
-            kuma::get_window().set_relative_mouse_mode(true);
-        }
-        if (kuma::input::was_mouse_button_released(kuma::MouseButton::Right)) {
-            kuma::get_window().set_relative_mouse_mode(false);
+        if (kuma::input::was_key_pressed(kuma::Key::T)) {
+            mode = (mode == CameraMode::Fps) ? CameraMode::Fly : CameraMode::Fps;
+            const bool fps_now = (mode == CameraMode::Fps);
+            kuma::get_window().set_relative_mouse_mode(fps_now);
+            kuma::log::info("Camera mode: %s", fps_now ? "FPS" : "Fly");
         }
 
-        camera_controller.update(camera);
+        if (mode == CameraMode::Fly) {
+            // Fly-mode RMB-hold matches the original sandbox feel.
+            if (kuma::input::was_mouse_button_pressed(kuma::MouseButton::Right)) {
+                kuma::get_window().set_relative_mouse_mode(true);
+            }
+            if (kuma::input::was_mouse_button_released(kuma::MouseButton::Right)) {
+                kuma::get_window().set_relative_mouse_mode(false);
+            }
+            fly_controller.update(camera);
+        } else {
+            kuma::Character& pc = registry.get<kuma::Character>(player);
+            kuma::Transform& pt = registry.get<kuma::Transform>(player);
+            fps_controller.update(pc, pt, camera);
+        }
+
         kuma::get_renderer().set_view_projection(camera.view_projection());
 
         // F spawns an icosahedron in front of the camera. Spawn is
@@ -187,11 +227,12 @@ int main() {
             kuma::log::info("Spawned bodies cleared");
         }
 
-        // Step physics: integrate forces, resolve collisions, sync
-        // dynamic body poses back into Transforms. Runs before the
-        // visual rotation system so the icosahedron view reflects
-        // the post-physics state for this frame.
-        kuma::physics::simulate(kuma::time::delta(), registry);
+        // Step character first so its motion + pushes feed into the
+        // physics step. Then physics: integrate forces, resolve
+        // collisions, sync dynamic body poses back into Transforms.
+        const float dt = kuma::time::delta();
+        kuma::character::simulate(dt, registry);
+        kuma::physics::simulate(dt, registry);
 
         // Run gameplay systems in declared order.
         spin_system(registry, kuma::time::total());
@@ -212,9 +253,26 @@ int main() {
             if (ImGui::Begin("Sandbox", nullptr, ImGuiWindowFlags_NoCollapse)) {
                 kuma::debug::section_header("Camera");
                 const kuma::Vec3 p = camera.position();
+                ImGui::Text("Mode:  %s", mode == CameraMode::Fps ? "FPS" : "Fly");
                 ImGui::Text("Pos:   (%.1f, %.1f, %.1f)", p.x, p.y, p.z);
                 ImGui::Text("Yaw:   %.2f rad", camera.yaw());
                 ImGui::Text("Pitch: %.2f rad", camera.pitch());
+
+                kuma::debug::section_header("Character");
+                const auto& pc = registry.get<kuma::Character>(player);
+                const auto& pt = registry.get<kuma::Transform>(player);
+                ImGui::Text("Pos:      (%.1f, %.1f, %.1f)",
+                            pt.position().x, pt.position().y, pt.position().z);
+                ImGui::Text("Velocity: (%.1f, %.1f, %.1f)",
+                            pc.velocity.x, pc.velocity.y, pc.velocity.z);
+                if (pc.on_ground) {
+                    ImGui::TextColored(ImVec4(0.5f, 0.9f, 0.5f, 1.0f), "On ground: yes");
+                } else {
+                    ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.4f, 1.0f), "On ground: no");
+                }
+                if (pc.on_steep) {
+                    ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.4f, 1.0f), "On steep slope");
+                }
 
                 kuma::debug::section_header("ECS");
                 ImGui::Text("Entities:   %zu", registry.view<kuma::Transform>().size());
@@ -224,7 +282,7 @@ int main() {
                 kuma::debug::section_header("Physics");
                 ImGui::Text("Bodies:    %u", kuma::physics::body_count());
                 ImGui::Text("Spawned:   %zu / %u", spawned.size(), kMaxSpawned);
-                ImGui::TextDisabled("F to spawn, R to reset");
+                ImGui::TextDisabled("F to spawn, R to reset, T to toggle Fly");
             }
             ImGui::End();
         }
@@ -261,16 +319,10 @@ int main() {
             kuma::get_renderer().set_pipeline(0);
         }
 
-        if (kuma::input::was_mouse_button_pressed(kuma::MouseButton::Left)) {
-            const kuma::Vec2 p = kuma::input::mouse_position();
-            kuma::log::info("LMB click at (%.0f, %.0f)", p.x, p.y);
-        }
-
         // Throttled FPS log (every 60 ticks, skipping frame 1 where
         // dt=0 by design).
         const uint64_t frame = kuma::time::frame_count();
         if (frame > 1 && frame % 60 == 0) {
-            const float dt = kuma::time::delta();
             kuma::log::info("frame %llu  dt=%.2fms  (~%.0f FPS)  total=%.1fs",
                             static_cast<unsigned long long>(frame), dt * 1000.0f,
                             dt > 0.0f ? 1.0f / dt : 0.0f, kuma::time::total());
