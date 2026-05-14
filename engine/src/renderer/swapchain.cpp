@@ -74,7 +74,89 @@ bool RendererImpl::create_swapchain() {
 
     kuma::log::info("Swapchain created: %ux%u (%u images)", extent.width, extent.height,
                     image_count);
+
+    if (!create_depth_resources()) {
+        return false;
+    }
     return true;
+}
+
+// ── Depth Attachment ────────────────────────────────────────────
+// Allocated alongside the swapchain (matching resolution), never
+// sampled, never read back. The render pass clears it to 1.0 every
+// frame via load_op = CLEAR and discards on store_op = DONT_CARE
+// since nothing else needs the depth values once the frame ships.
+//
+// Format is VK_FORMAT_D32_SFLOAT - the only depth format Vulkan
+// guarantees on every implementation, and float storage hands more
+// precision to geometry near the camera (where perspective
+// projection clusters depth values most aggressively).
+
+bool RendererImpl::create_depth_resources() {
+    VkImageCreateInfo img_info{};
+    img_info.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    img_info.imageType     = VK_IMAGE_TYPE_2D;
+    img_info.extent.width  = swapchain_extent_.width;
+    img_info.extent.height = swapchain_extent_.height;
+    img_info.extent.depth  = 1;
+    img_info.mipLevels     = 1;
+    img_info.arrayLayers   = 1;
+    img_info.format        = depth_format_;
+    img_info.tiling        = VK_IMAGE_TILING_OPTIMAL;
+    img_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    img_info.usage         = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    img_info.samples       = VK_SAMPLE_COUNT_1_BIT;
+    img_info.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
+
+    if (vkCreateImage(device_, &img_info, nullptr, &depth_image_) != VK_SUCCESS) {
+        kuma::log::error("Failed to create depth image");
+        return false;
+    }
+
+    VkMemoryRequirements mem_reqs{};
+    vkGetImageMemoryRequirements(device_, depth_image_, &mem_reqs);
+    VkMemoryAllocateInfo alloc_info{};
+    alloc_info.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc_info.allocationSize  = mem_reqs.size;
+    alloc_info.memoryTypeIndex =
+        find_memory_type(mem_reqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (vkAllocateMemory(device_, &alloc_info, nullptr, &depth_memory_) != VK_SUCCESS) {
+        kuma::log::error("Failed to allocate depth memory");
+        return false;
+    }
+    vkBindImageMemory(device_, depth_image_, depth_memory_, 0);
+
+    VkImageViewCreateInfo view_info{};
+    view_info.sType                           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    view_info.image                           = depth_image_;
+    view_info.viewType                        = VK_IMAGE_VIEW_TYPE_2D;
+    view_info.format                          = depth_format_;
+    view_info.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_DEPTH_BIT;
+    view_info.subresourceRange.baseMipLevel   = 0;
+    view_info.subresourceRange.levelCount     = 1;
+    view_info.subresourceRange.baseArrayLayer = 0;
+    view_info.subresourceRange.layerCount     = 1;
+    if (vkCreateImageView(device_, &view_info, nullptr, &depth_view_) != VK_SUCCESS) {
+        kuma::log::error("Failed to create depth image view");
+        return false;
+    }
+
+    return true;
+}
+
+void RendererImpl::destroy_depth_resources() {
+    if (depth_view_ != VK_NULL_HANDLE) {
+        vkDestroyImageView(device_, depth_view_, nullptr);
+        depth_view_ = VK_NULL_HANDLE;
+    }
+    if (depth_image_ != VK_NULL_HANDLE) {
+        vkDestroyImage(device_, depth_image_, nullptr);
+        depth_image_ = VK_NULL_HANDLE;
+    }
+    if (depth_memory_ != VK_NULL_HANDLE) {
+        vkFreeMemory(device_, depth_memory_, nullptr);
+        depth_memory_ = VK_NULL_HANDLE;
+    }
 }
 
 void RendererImpl::destroy_swapchain() {
@@ -82,6 +164,8 @@ void RendererImpl::destroy_swapchain() {
         vkDestroyFramebuffer(device_, fb, nullptr);
     }
     framebuffers_.clear();
+
+    destroy_depth_resources();
 
     for (auto view : swapchain_image_views_) {
         vkDestroyImageView(device_, view, nullptr);
@@ -133,27 +217,55 @@ bool RendererImpl::create_render_pass() {
     color_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     color_attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
+    // Depth attachment lives in slot 1. CLEAR every frame, DONT_CARE
+    // on store - nothing reads depth after the frame submits, so the
+    // driver is free to skip writing it back to memory.
+    VkAttachmentDescription depth_attachment{};
+    depth_attachment.format         = depth_format_;
+    depth_attachment.samples        = VK_SAMPLE_COUNT_1_BIT;
+    depth_attachment.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depth_attachment.storeOp        = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depth_attachment.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    depth_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depth_attachment.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
+    depth_attachment.finalLayout    = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
     VkAttachmentReference color_ref{};
     color_ref.attachment = 0;
     color_ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
+    VkAttachmentReference depth_ref{};
+    depth_ref.attachment = 1;
+    depth_ref.layout     = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
     VkSubpassDescription subpass{};
     subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    subpass.colorAttachmentCount = 1;
-    subpass.pColorAttachments = &color_ref;
+    subpass.colorAttachmentCount    = 1;
+    subpass.pColorAttachments       = &color_ref;
+    subpass.pDepthStencilAttachment = &depth_ref;
 
+    // Subpass dependency now spans both color output AND the
+    // early/late fragment-test stages where the depth load_op runs.
+    // Without including the depth stages, the render pass could
+    // start clearing depth before previous frames' depth reads
+    // complete, producing validation errors.
     VkSubpassDependency dependency{};
     dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
     dependency.dstSubpass = 0;
-    dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                              VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
     dependency.srcAccessMask = 0;
-    dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                              VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                               VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+    std::array<VkAttachmentDescription, 2> attachments = {color_attachment, depth_attachment};
 
     VkRenderPassCreateInfo create_info{};
     create_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    create_info.attachmentCount = 1;
-    create_info.pAttachments = &color_attachment;
+    create_info.attachmentCount = static_cast<uint32_t>(attachments.size());
+    create_info.pAttachments = attachments.data();
     create_info.subpassCount = 1;
     create_info.pSubpasses = &subpass;
     create_info.dependencyCount = 1;
@@ -174,11 +286,18 @@ bool RendererImpl::create_framebuffers() {
     framebuffers_.resize(swapchain_image_views_.size());
 
     for (size_t i = 0; i < swapchain_image_views_.size(); i++) {
+        // Two attachments per framebuffer: the per-image swapchain
+        // color view (different for each framebuffer) and the single
+        // shared depth view (same for every framebuffer because we
+        // only use one frame in flight's worth of depth at a time -
+        // the render pass clears it on each begin).
+        std::array<VkImageView, 2> attachments = {swapchain_image_views_[i], depth_view_};
+
         VkFramebufferCreateInfo fb_info{};
         fb_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
         fb_info.renderPass = render_pass_;
-        fb_info.attachmentCount = 1;
-        fb_info.pAttachments = &swapchain_image_views_[i];
+        fb_info.attachmentCount = static_cast<uint32_t>(attachments.size());
+        fb_info.pAttachments = attachments.data();
         fb_info.width = swapchain_extent_.width;
         fb_info.height = swapchain_extent_.height;
         fb_info.layers = 1;

@@ -135,6 +135,8 @@ private:
     bool recreate_swapchain();
     bool create_render_pass();
     bool create_framebuffers();
+    bool create_depth_resources();
+    void destroy_depth_resources();
     VkSurfaceFormatKHR choose_surface_format() const;
     VkPresentModeKHR choose_present_mode() const;
     VkExtent2D choose_extent() const;
@@ -188,6 +190,16 @@ private:
     // Render pass and framebuffers
     VkRenderPass render_pass_ = VK_NULL_HANDLE;
     std::vector<VkFramebuffer> framebuffers_;
+
+    // Depth attachment. Created alongside the swapchain at the same
+    // resolution; the render pass clears it to 1.0 every frame and
+    // discards the contents on store (depth is internal-only - never
+    // sampled, never read back). Recreated when the swapchain is
+    // recreated on resize.
+    VkImage        depth_image_  = VK_NULL_HANDLE;
+    VkDeviceMemory depth_memory_ = VK_NULL_HANDLE;
+    VkImageView    depth_view_   = VK_NULL_HANDLE;
+    VkFormat       depth_format_ = VK_FORMAT_D32_SFLOAT;
 
     // Graphics pipeline
     VkPipelineLayout pipeline_layout_ = VK_NULL_HANDLE;

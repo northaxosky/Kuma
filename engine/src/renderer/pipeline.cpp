@@ -228,6 +228,23 @@ VkPipeline RendererImpl::build_pipeline(const char* vert_spv, const char* frag_s
         }
     }
 
+    // Depth state. Both pipelines write depth so the textured passes
+    // and debug-normal passes interact correctly when mixed in the
+    // same frame. Compare op LESS = "smaller depth wins" since we
+    // clear the buffer to 1.0 (the maximum, "infinitely far") and
+    // expect real geometry to write smaller values. depthBoundsTest
+    // and stencilTest stay disabled - we only need a plain z-buffer
+    // here, no fancy bound-rejection or stencil masking.
+    VkPipelineDepthStencilStateCreateInfo depth_stencil{};
+    depth_stencil.sType                 = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    depth_stencil.depthTestEnable       = VK_TRUE;
+    depth_stencil.depthWriteEnable      = VK_TRUE;
+    depth_stencil.depthCompareOp        = VK_COMPARE_OP_LESS;
+    depth_stencil.depthBoundsTestEnable = VK_FALSE;
+    depth_stencil.stencilTestEnable     = VK_FALSE;
+    depth_stencil.minDepthBounds        = 0.0f;
+    depth_stencil.maxDepthBounds        = 1.0f;
+
     VkResult result = VK_SUCCESS;
 
     // Create the pipeline
@@ -240,7 +257,7 @@ VkPipeline RendererImpl::build_pipeline(const char* vert_spv, const char* frag_s
     pipeline_info.pViewportState = &viewport_state;
     pipeline_info.pRasterizationState = &rasterizer;
     pipeline_info.pMultisampleState = &multisampling;
-    pipeline_info.pDepthStencilState = nullptr;
+    pipeline_info.pDepthStencilState = &depth_stencil;
     pipeline_info.pColorBlendState = &color_blending;
     pipeline_info.pDynamicState = &dynamic_state;
     pipeline_info.layout = pipeline_layout_;

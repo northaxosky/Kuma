@@ -210,7 +210,14 @@ bool RendererImpl::begin_frame() {
     begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     vkBeginCommandBuffer(cmd, &begin_info);
 
-    VkClearValue clear_color = {{{0.05f, 0.05f, 0.12f, 1.0f}}};
+    // Two clear values, one per attachment, in the same order the
+    // render pass declared them: color (slot 0), depth (slot 1).
+    // Depth clears to 1.0 - the maximum value any real geometry can
+    // produce - so the LESS compare op accepts every first fragment
+    // and rejects nothing on a fresh frame.
+    std::array<VkClearValue, 2> clear_values{};
+    clear_values[0].color        = {{0.05f, 0.05f, 0.12f, 1.0f}};
+    clear_values[1].depthStencil = {1.0f, 0};
 
     VkRenderPassBeginInfo rp_info{};
     rp_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -218,8 +225,8 @@ bool RendererImpl::begin_frame() {
     rp_info.framebuffer = framebuffers_[current_image_index_];
     rp_info.renderArea.offset = {0, 0};
     rp_info.renderArea.extent = swapchain_extent_;
-    rp_info.clearValueCount = 1;
-    rp_info.pClearValues = &clear_color;
+    rp_info.clearValueCount = static_cast<uint32_t>(clear_values.size());
+    rp_info.pClearValues = clear_values.data();
 
     vkCmdBeginRenderPass(cmd, &rp_info, VK_SUBPASS_CONTENTS_INLINE);
 
