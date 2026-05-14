@@ -34,3 +34,10 @@ vendor/
 
 # Logs
 *.log
+
+# Sponza glTF source (downloaded separately by sandbox build).
+# Khronos's Sample-Assets Sponza .gltf + .bin total ~10 MB; the
+# referenced .jpg textures (which we don't ship since materials
+# aren't wired yet) would add ~50 MB. The bake produces only the
+# .kscene + .kmesh files which live under build/, also ignored.
+assets/source/scenes/Sponza/

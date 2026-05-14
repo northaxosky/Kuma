@@ -25,6 +25,7 @@ Kuma is designed for small, indie games — prioritizing simplicity, modularity,
 - **Physics** — [Jolt Physics](https://github.com/jrouwe/JoltPhysics) 5.5.0 wired through an opaque `kuma::physics` API. Dynamic / Static / Kinematic bodies, sphere / box / capsule shapes, fixed-step accumulator with spiral-of-death clamp. Bodies plug into the ECS via a `PhysicsBody` component; the simulation owns dynamic poses and syncs them back into the entity's `Transform` each frame. Sandbox demo: invisible floor plane, F to spawn an icosahedron in front of the camera, R to clear them all.
 - **Character controller** — Kinematic FPS capsule on top of Jolt's `CharacterVirtual`. Step-and-slide collision, slope detection, auto-step over short obstacles, ground state, pushes dynamic bodies. `Character` ECS component pairs with a `Transform`; `kuma::character::simulate` runs in lockstep with the physics fixed step. `FpsCameraController` reads input and writes both character and camera (mouse-look on yaw + pitch, WASD relative to character yaw, Space jump). Sandbox spawns one player; T toggles between FPS mode and the original free-fly camera for debug inspection.
 - **Audio** — [miniaudio](https://miniaud.io/) 0.11 wired through an opaque `kuma::audio` API. Plays WAV / OGG sounds with 3D positional spatialization (distance attenuation + stereo panning) tracking a per-frame listener pose. Dual API surface: `play_sound` / `play_sound_at` for fire-and-forget one-shots returning a generation-checked `SoundHandle`, and an `AudioSource` ECS component for long-running music / ambience that syncs volume + looping every frame. Asset pipeline: `kuma-bake sound` uses Symphonia to convert .wav into uncompressed PCM `.ksound` (zero-decode-at-load for tight SFX) or pass .ogg bytes through unchanged (~10x compression for music). Sandbox demo: ambient music loop on the player + impact thud at each spawned icosahedron's world position.
+- **Scenes** — Multi-mesh asset loading via `kuma::scene::load_and_spawn`. `kuma-bake scene` walks a glTF scene tree, dedups primitive geometry into per-primitive `.kmesh` files, composes parent-chain world transforms, and writes a `.kscene` index referencing them. Runtime spawns one ECS entity per node with `Transform` + `MeshRef` + `SceneTag`, sharing meshes across instances through the existing ResourceManager path cache. Sandbox loads [Khronos's standard Sponza](https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/Sponza) (103 unique meshes, 103 nodes, ~7.5 MB baked) - the player walks around inside a real architectural test scene with the icosahedron impact-spawn demo unchanged.
 - **Input** — keyboard & mouse polling with edge detection (pressed/released this frame)
 - **Time** — monotonic delta / total / frame count with anti-spiral clamp
 - **Frame orchestration** — engine-owned `begin_frame()` / `end_frame()` wrapping a 5-phase contract (input → time → update → render → present)
@@ -60,6 +61,16 @@ cmake --build build --config Debug
 ```
 
 Or in VS Code: press **F5** (launch.json and tasks.json are included).
+
+#### Sponza scene
+
+The sandbox loads [Khronos's standard Sponza](https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/Sponza) (~10 MB). The source files are gitignored; download them once with:
+
+```pwsh
+pwsh tools\download_sponza.ps1
+```
+
+After that, `cmake --build` will bake `Sponza.kscene` + 103 sibling `.kmesh` files into `build/assets/scenes/`.
 
 `cmake --build` invokes `cargo` automatically to build `kuma-bake` and bakes
 the sandbox's source assets into the engine binary format (`.kmesh`, `.ktex`)

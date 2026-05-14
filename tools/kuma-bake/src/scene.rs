@@ -52,9 +52,18 @@ struct PendingNode {
 /// .kmesh files. Output sibling directory is named after the
 /// .kscene basename plus "-meshes".
 pub fn bake_scene(input: &Path, output: &Path) -> Result<(), BakeError> {
-    let (doc, buffers, _images) = gltf::import(input)?;
+    // The gltf crate's high-level `import` tries to load every
+    // referenced texture as well, which would fail noisily on
+    // material-less geometry sources where the textures aren't
+    // shipped (Sponza in particular). Open the document directly
+    // and load only buffer data so missing image files don't break
+    // the bake. Materials/textures get IGNORED for now anyway.
+    let gltf_root = gltf::Gltf::open(input).map_err(BakeError::Gltf)?;
+    let document  = gltf_root.document.clone();
+    let blob      = gltf_root.blob.clone();
+    let buffers   = load_buffers(&document, input, blob)?;
 
-    if doc.meshes().count() == 0 {
+    if document.meshes().count() == 0 {
         return Err(BakeError::Invalid(format!(
             "glTF '{}' contains no meshes - nothing to bake into a scene",
             input.display()
@@ -63,9 +72,9 @@ pub fn bake_scene(input: &Path, output: &Path) -> Result<(), BakeError> {
 
     // Pick a scene to walk. glTF lets a file specify a default;
     // fall back to the first scene if none is marked default.
-    let scene = doc
+    let scene = document
         .default_scene()
-        .or_else(|| doc.scenes().next())
+        .or_else(|| document.scenes().next())
         .ok_or_else(|| BakeError::Invalid(format!(
             "glTF '{}' has no scenes - cannot pick a node tree to bake",
             input.display()
@@ -95,7 +104,7 @@ pub fn bake_scene(input: &Path, output: &Path) -> Result<(), BakeError> {
 
     for root in scene.nodes() {
         walk_node(
-            &doc,
+            &document,
             &buffers,
             &root,
             IDENTITY,
@@ -123,6 +132,93 @@ pub fn bake_scene(input: &Path, output: &Path) -> Result<(), BakeError> {
     }
 
     write_kscene(output, &mesh_paths, &nodes)
+}
+
+// Load every buffer referenced by the document. Mirrors what
+// gltf::import does for buffers - resolves embedded base64,
+// embedded .glb chunks, or external .bin paths relative to the
+// .gltf - WITHOUT touching images so missing texture files don't
+// fail the bake.
+fn load_buffers(
+    document: &gltf::Document,
+    input: &Path,
+    blob: Option<Vec<u8>>,
+) -> Result<Vec<gltf::buffer::Data>, BakeError> {
+    let base_dir = input.parent().unwrap_or_else(|| Path::new("."));
+    let mut result: Vec<gltf::buffer::Data> = Vec::new();
+    let mut blob = blob;
+
+    for buffer in document.buffers() {
+        let data: Vec<u8> = match buffer.source() {
+            gltf::buffer::Source::Bin => blob
+                .take()
+                .ok_or_else(|| BakeError::Invalid(format!(
+                    "glTF '{}' references embedded BIN but no blob is present",
+                    input.display()
+                )))?,
+            gltf::buffer::Source::Uri(uri) => {
+                if let Some(rest) = uri.strip_prefix("data:") {
+                    decode_data_uri(rest).map_err(BakeError::Invalid)?
+                } else {
+                    let resolved = base_dir.join(uri);
+                    fs::read(&resolved).map_err(|e| BakeError::io(resolved, e))?
+                }
+            }
+        };
+        if data.len() < buffer.length() {
+            return Err(BakeError::Invalid(format!(
+                "glTF '{}' buffer #{} declared {} bytes but loaded {}",
+                input.display(),
+                buffer.index(),
+                buffer.length(),
+                data.len()
+            )));
+        }
+        result.push(gltf::buffer::Data(data));
+    }
+    Ok(result)
+}
+
+// Minimal "data:application/octet-stream;base64,...." URI decoder
+// for the inline-buffer glTF variant. Used rarely but glTF spec
+// permits it and Sponza's reference geometry doesn't embed buffers,
+// so this exists for completeness.
+fn decode_data_uri(rest: &str) -> Result<Vec<u8>, String> {
+    let comma = rest.find(',').ok_or_else(|| "data URI missing comma".to_string())?;
+    let (meta, payload) = rest.split_at(comma);
+    let payload = &payload[1..];
+    if !meta.contains(";base64") {
+        return Err("non-base64 data URIs not supported".to_string());
+    }
+    decode_base64(payload)
+}
+
+fn decode_base64(s: &str) -> Result<Vec<u8>, String> {
+    const TABLE: &[i8; 256] = &{
+        let mut t = [-1_i8; 256];
+        let alphabet = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut i = 0;
+        while i < alphabet.len() {
+            t[alphabet[i] as usize] = i as i8;
+            i += 1;
+        }
+        t
+    };
+    let mut out: Vec<u8> = Vec::with_capacity(s.len() * 3 / 4);
+    let mut buf: u32 = 0;
+    let mut nbits: u32 = 0;
+    for &b in s.as_bytes() {
+        if b == b'=' || b.is_ascii_whitespace() { continue; }
+        let v = TABLE[b as usize];
+        if v < 0 { return Err(format!("invalid base64 byte 0x{:02x}", b)); }
+        buf = (buf << 6) | (v as u32);
+        nbits += 6;
+        if nbits >= 8 {
+            nbits -= 8;
+            out.push(((buf >> nbits) & 0xFF) as u8);
+        }
+    }
+    Ok(out)
 }
 
 // Recursive scene-tree walker. Composes world = parent * local at
