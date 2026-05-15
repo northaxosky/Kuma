@@ -104,6 +104,19 @@ bool init(const EngineConfig& config) {
         return false;
     }
 
+    if (!particles::init()) {
+        scene::shutdown();
+        audio::shutdown();
+        character::shutdown();
+        physics::shutdown();
+        s_resource_manager.shutdown();
+        s_renderer.shutdown();
+        s_window.destroy();
+        input::shutdown();
+        SDL_Quit();
+        return false;
+    }
+
     // Load default resources via the resource manager
     const auto* mesh = s_resource_manager.load_mesh_binary(
         platform::exe_relative("assets/models/quad.kmesh").c_str());
@@ -137,6 +150,7 @@ bool init(const EngineConfig& config) {
 void shutdown() {
     s_renderer.wait_idle();         // GPU finishes all work
     debug::shutdown();              // tears down ImGui (must be before renderer)
+    particles::shutdown();          // drop emitter caches before resources go
     scene::shutdown();              // drop scene cache before resources go
     audio::shutdown();              // stop sounds before SDL releases the device
     character::shutdown();          // release character controllers before physics

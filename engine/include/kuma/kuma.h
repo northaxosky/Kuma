@@ -10,6 +10,8 @@
 #include <kuma/ecs.h>
 #include <kuma/fps_camera.h>
 #include <kuma/input.h>
+#include <kuma/material.h>
+#include <kuma/particles.h>
 #include <kuma/physics.h>
 #include <kuma/platform.h>
 #include <kuma/renderer.h>
