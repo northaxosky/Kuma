@@ -125,6 +125,29 @@ public:
     // not call this.
     void* imgui_init_context();
 
+    // ── Particle rendering (engine-internal) ────────────────────
+    // The particles:: module hands per-frame instance data to the
+    // renderer through these calls. Not for game code.
+
+    // Append one emitter's worth of per-particle render state into
+    // the current frame's instance ring buffer. instances points at
+    // a tightly-packed array of ParticleInstance structures; count
+    // is the number of entries. Returns the byte offset into the
+    // ring buffer where the upload landed (later passed to
+    // draw_particles), or kInvalidParticleUpload if the ring buffer
+    // would overflow.
+    static constexpr uint32_t kInvalidParticleUpload = 0xFFFF'FFFFu;
+    uint32_t upload_particle_instances(const void* instances, uint32_t count);
+
+    // Issue an instanced draw for a previously-uploaded chunk of
+    // particle instances. Caller is responsible for binding the
+    // material descriptor set (via set_material) before calling.
+    // upload_offset must be a value previously returned by
+    // upload_particle_instances; count is the number of instances
+    // to draw (<= the number originally uploaded).
+    void draw_particles(uint32_t upload_offset, uint32_t count,
+                        const Mat4& view, const Mat4& view_projection);
+
 private:
     RendererImpl* impl_ = nullptr;
 };

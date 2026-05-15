@@ -52,19 +52,44 @@ VkShaderModule RendererImpl::create_shader_module(const std::vector<char>& code)
 // range. The pipeline LAYOUT is shared; only the shader-stage modules
 // and the resulting VkPipeline differ.
 
+// ── Pipeline build options ──────────────────────────────────────
+// Captures the small set of state that varies between pipelines so
+// build_pipeline can stay one function. Defaults match the original
+// opaque-mesh pipelines that shipped before particles existed; the
+// new transparent particle pipeline overrides them.
+struct PipelineCreateOptions {
+    bool depth_write = true;     // opaque writes; transparent doesn't (preserves the
+                                 // depth values opaque draws established for blend tests)
+    bool alpha_blend = false;    // opaque overwrites; transparent blends
+    bool instanced   = false;    // particles use a per-instance vertex binding;
+                                 // mesh pipelines stick with per-vertex only
+};
+
 bool RendererImpl::create_graphics_pipelines() {
-    graphics_pipeline_ = build_pipeline("shaders/quad.vert.spv", "shaders/quad.frag.spv");
+    graphics_pipeline_ = build_pipeline("shaders/quad.vert.spv",
+                                        "shaders/quad.frag.spv", {});
     if (graphics_pipeline_ == VK_NULL_HANDLE) return false;
 
     debug_normal_pipeline_ =
-        build_pipeline("shaders/debug_normal.vert.spv", "shaders/debug_normal.frag.spv");
+        build_pipeline("shaders/debug_normal.vert.spv",
+                       "shaders/debug_normal.frag.spv", {});
     if (debug_normal_pipeline_ == VK_NULL_HANDLE) return false;
 
-    kuma::log::info("Graphics pipelines created (textured + debug normal)");
+    PipelineCreateOptions particle_opts{};
+    particle_opts.depth_write = false;
+    particle_opts.alpha_blend = true;
+    particle_opts.instanced   = true;
+    transparent_pipeline_ = build_pipeline("shaders/particle.vert.spv",
+                                           "shaders/particle.frag.spv",
+                                           particle_opts);
+    if (transparent_pipeline_ == VK_NULL_HANDLE) return false;
+
+    kuma::log::info("Graphics pipelines created (textured + debug normal + particle)");
     return true;
 }
 
-VkPipeline RendererImpl::build_pipeline(const char* vert_spv, const char* frag_spv) {
+VkPipeline RendererImpl::build_pipeline(const char* vert_spv, const char* frag_spv,
+                                        const PipelineCreateOptions& opts) {
     auto vert_code = read_binary_file(platform::exe_relative(vert_spv).c_str());
     auto frag_code = read_binary_file(platform::exe_relative(frag_spv).c_str());
 
@@ -95,35 +120,81 @@ VkPipeline RendererImpl::build_pipeline(const char* vert_spv, const char* frag_s
 
     std::array<VkPipelineShaderStageCreateInfo, 2> shader_stages = {vert_stage, frag_stage};
 
-    // Vertex input
-    VkVertexInputBindingDescription binding_desc{};
-    binding_desc.binding = 0;
-    binding_desc.stride = sizeof(Vertex);
-    binding_desc.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    // Vertex input layout - varies between mesh pipelines (one
+    // per-vertex binding) and the particle pipeline (one per-vertex
+    // for the unit quad, one per-instance for per-particle data).
+    VkVertexInputBindingDescription                  bindings[2]{};
+    std::array<VkVertexInputAttributeDescription, 5> attr_descs{};
+    uint32_t binding_count = 0;
+    uint32_t attr_count    = 0;
 
-    std::array<VkVertexInputAttributeDescription, 3> attr_descs{};
+    if (opts.instanced) {
+        // Particle pipeline:
+        //   binding 0 = 4 unit-quad corners    (vec2, per-vertex)
+        //   binding 1 = per-particle instance  (vec3 pos + float size + vec4 color)
+        bindings[0].binding   = 0;
+        bindings[0].stride    = sizeof(ParticleQuadVertex);
+        bindings[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
-    attr_descs[0].binding = 0;
-    attr_descs[0].location = 0;
-    attr_descs[0].format = VK_FORMAT_R32G32B32_SFLOAT;
-    attr_descs[0].offset = offsetof(Vertex, pos);
+        bindings[1].binding   = 1;
+        bindings[1].stride    = sizeof(ParticleInstance);
+        bindings[1].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
 
-    attr_descs[1].binding = 0;
-    attr_descs[1].location = 1;
-    attr_descs[1].format = VK_FORMAT_R32G32_SFLOAT;
-    attr_descs[1].offset = offsetof(Vertex, uv);
+        binding_count = 2;
 
-    attr_descs[2].binding = 0;
-    attr_descs[2].location = 2;
-    attr_descs[2].format = VK_FORMAT_R32G32B32_SFLOAT;
-    attr_descs[2].offset = offsetof(Vertex, normal);
+        attr_descs[0].binding  = 0;
+        attr_descs[0].location = 0;
+        attr_descs[0].format   = VK_FORMAT_R32G32_SFLOAT;
+        attr_descs[0].offset   = offsetof(ParticleQuadVertex, corner);
+
+        attr_descs[1].binding  = 1;
+        attr_descs[1].location = 1;
+        attr_descs[1].format   = VK_FORMAT_R32G32B32_SFLOAT;
+        attr_descs[1].offset   = offsetof(ParticleInstance, position);
+
+        attr_descs[2].binding  = 1;
+        attr_descs[2].location = 2;
+        attr_descs[2].format   = VK_FORMAT_R32_SFLOAT;
+        attr_descs[2].offset   = offsetof(ParticleInstance, size);
+
+        attr_descs[3].binding  = 1;
+        attr_descs[3].location = 3;
+        attr_descs[3].format   = VK_FORMAT_R32G32B32A32_SFLOAT;
+        attr_descs[3].offset   = offsetof(ParticleInstance, color);
+
+        attr_count = 4;
+    } else {
+        // Mesh pipeline: one per-vertex binding for the standard
+        // position+uv+normal vertex layout shared with the bake.
+        bindings[0].binding   = 0;
+        bindings[0].stride    = sizeof(Vertex);
+        bindings[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+        binding_count = 1;
+
+        attr_descs[0].binding  = 0;
+        attr_descs[0].location = 0;
+        attr_descs[0].format   = VK_FORMAT_R32G32B32_SFLOAT;
+        attr_descs[0].offset   = offsetof(Vertex, pos);
+
+        attr_descs[1].binding  = 0;
+        attr_descs[1].location = 1;
+        attr_descs[1].format   = VK_FORMAT_R32G32_SFLOAT;
+        attr_descs[1].offset   = offsetof(Vertex, uv);
+
+        attr_descs[2].binding  = 0;
+        attr_descs[2].location = 2;
+        attr_descs[2].format   = VK_FORMAT_R32G32B32_SFLOAT;
+        attr_descs[2].offset   = offsetof(Vertex, normal);
+
+        attr_count = 3;
+    }
 
     VkPipelineVertexInputStateCreateInfo vertex_input{};
     vertex_input.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertex_input.vertexBindingDescriptionCount = 1;
-    vertex_input.pVertexBindingDescriptions = &binding_desc;
-    vertex_input.vertexAttributeDescriptionCount = static_cast<uint32_t>(attr_descs.size());
-    vertex_input.pVertexAttributeDescriptions = attr_descs.data();
+    vertex_input.vertexBindingDescriptionCount = binding_count;
+    vertex_input.pVertexBindingDescriptions    = bindings;
+    vertex_input.vertexAttributeDescriptionCount = attr_count;
+    vertex_input.pVertexAttributeDescriptions  = attr_descs.data();
 
     // Input assembly
     VkPipelineInputAssemblyStateCreateInfo input_assembly{};
@@ -152,7 +223,12 @@ VkPipeline RendererImpl::build_pipeline(const char* vert_spv, const char* frag_s
     rasterizer.rasterizerDiscardEnable = VK_FALSE;
     rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
     rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+    // Particles render as camera-facing quads. Their CCW/CW winding
+    // is decided by the vertex shader's corner output and there's no
+    // meaningful "back" of a billboard, so we disable face culling
+    // entirely for the instanced pipeline. Mesh pipelines still cull
+    // backfaces - skips invisible interior triangles.
+    rasterizer.cullMode = opts.instanced ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT;
     rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     rasterizer.depthBiasEnable = VK_FALSE;
 
@@ -162,11 +238,26 @@ VkPipeline RendererImpl::build_pipeline(const char* vert_spv, const char* frag_s
     multisampling.sampleShadingEnable = VK_FALSE;
     multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
-    // Color blending
+    // Color blending. Opaque pipelines do "new color replaces pixel";
+    // transparent pipelines do standard alpha blend
+    //   final = SRC.rgb * SRC.a + DST.rgb * (1 - SRC.a)
+    // which is the equation expected for un-premultiplied source
+    // textures. Premultiplied / additive / multiplicative blends are
+    // followups (one per-emitter blend mode field would carry them).
     VkPipelineColorBlendAttachmentState blend_attachment{};
     blend_attachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
                                       VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    blend_attachment.blendEnable = VK_FALSE;
+    if (opts.alpha_blend) {
+        blend_attachment.blendEnable         = VK_TRUE;
+        blend_attachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+        blend_attachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        blend_attachment.colorBlendOp        = VK_BLEND_OP_ADD;
+        blend_attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        blend_attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        blend_attachment.alphaBlendOp        = VK_BLEND_OP_ADD;
+    } else {
+        blend_attachment.blendEnable = VK_FALSE;
+    }
 
     VkPipelineColorBlendStateCreateInfo color_blending{};
     color_blending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
@@ -206,11 +297,23 @@ VkPipeline RendererImpl::build_pipeline(const char* vert_spv, const char* frag_s
     }
 
     if (pipeline_layout_ == VK_NULL_HANDLE) {
-        // Push constant range: 64 bytes (one mat4) accessible from vertex shader
+        // Push constant range: 96 bytes accessible from the vertex
+        // stage. Layout is shared across all pipelines:
+        //   bytes  0..63  = mat4 view_projection
+        //                    (mesh shaders use this as MVP after
+        //                    multiplying model in on the CPU side;
+        //                    particle shader uses it as VP and adds
+        //                    instance position in the vertex shader)
+        //   bytes 64..79  = vec4 camera_right (xyz; w padding)
+        //   bytes 80..95  = vec4 camera_up    (xyz; w padding)
+        //
+        // Mesh draws push only the first 64 bytes; particle draws
+        // push all 96. Vulkan allows partial pushes against a larger
+        // declared range, so existing mesh shaders see no change.
         VkPushConstantRange push_range{};
         push_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
         push_range.offset = 0;
-        push_range.size = sizeof(float) * 16;  // mat4 = 16 floats = 64 bytes
+        push_range.size = sizeof(float) * 24;  // mat4 (16) + vec4 (4) + vec4 (4)
 
         VkPipelineLayoutCreateInfo layout_info{};
         layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -228,17 +331,17 @@ VkPipeline RendererImpl::build_pipeline(const char* vert_spv, const char* frag_s
         }
     }
 
-    // Depth state. Both pipelines write depth so the textured passes
-    // and debug-normal passes interact correctly when mixed in the
-    // same frame. Compare op LESS = "smaller depth wins" since we
-    // clear the buffer to 1.0 (the maximum, "infinitely far") and
-    // expect real geometry to write smaller values. depthBoundsTest
-    // and stencilTest stay disabled - we only need a plain z-buffer
-    // here, no fancy bound-rejection or stencil masking.
+    // Depth state. Opaque pipelines write depth so meshes interact
+    // correctly when mixed in the same frame. Transparent pipelines
+    // (particles) test against the depth values opaque draws wrote
+    // - that's why opaque must render first - but DON'T write,
+    // because a transparent fragment shouldn't occlude the things
+    // behind it. Compare op LESS = "smaller depth wins" since we
+    // clear the buffer to 1.0.
     VkPipelineDepthStencilStateCreateInfo depth_stencil{};
     depth_stencil.sType                 = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
     depth_stencil.depthTestEnable       = VK_TRUE;
-    depth_stencil.depthWriteEnable      = VK_TRUE;
+    depth_stencil.depthWriteEnable      = opts.depth_write ? VK_TRUE : VK_FALSE;
     depth_stencil.depthCompareOp        = VK_COMPARE_OP_LESS;
     depth_stencil.depthBoundsTestEnable = VK_FALSE;
     depth_stencil.stencilTestEnable     = VK_FALSE;

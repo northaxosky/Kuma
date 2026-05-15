@@ -351,6 +351,151 @@ void RendererImpl::destroy_material_resources() {
     materials_allocated_ = 0;
 }
 
+// ── Particle GPU Buffers ───────────────────────────────────────
+// The particle pipeline reads two vertex bindings:
+//   binding 0 = the unit-quad corners (4 vertices, 6 indices)
+//   binding 1 = a per-frame ring buffer of per-particle instance
+//               data appended by the particles module
+//
+// Quad geometry is constant for the renderer's lifetime - allocate
+// once at init, free once at shutdown. Instance buffers are one
+// per-frame-in-flight so a previous frame's draw can keep reading
+// its instance data while the current frame appends new entries.
+
+bool RendererImpl::create_particle_quad() {
+    // Four corners in (-0.5, 0.5)^2. The vertex shader picks corner
+    // and multiplies by the per-instance size to produce the world-
+    // space billboard.
+    const ParticleQuadVertex vertices[4] = {
+        {{-0.5f, -0.5f}},
+        {{ 0.5f, -0.5f}},
+        {{-0.5f,  0.5f}},
+        {{ 0.5f,  0.5f}},
+    };
+    // Two triangles winding counter-clockwise so face culling - if
+    // the pipeline ever re-enables it - keeps front-facing quads.
+    // The particle pipeline disables culling anyway so the winding
+    // is mostly defensive documentation.
+    const uint16_t indices[6] = {0, 1, 2, 2, 1, 3};
+
+    auto upload = [&](const void* data, VkDeviceSize size, VkBufferUsageFlags usage,
+                      VkBuffer& out_buffer, VkDeviceMemory& out_memory) {
+        VkBufferCreateInfo bi{};
+        bi.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bi.size        = size;
+        bi.usage       = usage;
+        bi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        if (vkCreateBuffer(device_, &bi, nullptr, &out_buffer) != VK_SUCCESS) return false;
+
+        VkMemoryRequirements reqs{};
+        vkGetBufferMemoryRequirements(device_, out_buffer, &reqs);
+        VkMemoryAllocateInfo ai{};
+        ai.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        ai.allocationSize  = reqs.size;
+        ai.memoryTypeIndex = find_memory_type(
+            reqs.memoryTypeBits,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        if (vkAllocateMemory(device_, &ai, nullptr, &out_memory) != VK_SUCCESS) return false;
+        vkBindBufferMemory(device_, out_buffer, out_memory, 0);
+
+        void* mapped = nullptr;
+        vkMapMemory(device_, out_memory, 0, size, 0, &mapped);
+        std::memcpy(mapped, data, static_cast<size_t>(size));
+        vkUnmapMemory(device_, out_memory);
+        return true;
+    };
+
+    if (!upload(vertices, sizeof(vertices), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                particle_quad_vertex_buffer_, particle_quad_vertex_memory_)) {
+        kuma::log::error("Failed to allocate particle quad vertex buffer");
+        return false;
+    }
+    if (!upload(indices, sizeof(indices), VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                particle_quad_index_buffer_, particle_quad_index_memory_)) {
+        kuma::log::error("Failed to allocate particle quad index buffer");
+        return false;
+    }
+    return true;
+}
+
+bool RendererImpl::create_particle_instance_buffers() {
+    // One buffer per frame in flight. Each is host-visible+coherent
+    // and stays mapped for the renderer's lifetime so per-frame
+    // appends are a plain memcpy with no map/unmap churn.
+    const VkDeviceSize size = static_cast<VkDeviceSize>(kParticleRingCapacity)
+                            * sizeof(ParticleInstance);
+
+    particle_instance_buffers_.resize(MAX_FRAMES_IN_FLIGHT, VK_NULL_HANDLE);
+    particle_instance_memory_.resize(MAX_FRAMES_IN_FLIGHT, VK_NULL_HANDLE);
+    particle_instance_mapped_.resize(MAX_FRAMES_IN_FLIGHT, nullptr);
+
+    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+        VkBufferCreateInfo bi{};
+        bi.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bi.size        = size;
+        bi.usage       = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+        bi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        if (vkCreateBuffer(device_, &bi, nullptr, &particle_instance_buffers_[i]) != VK_SUCCESS) {
+            kuma::log::error("Failed to allocate particle instance buffer %u", i);
+            return false;
+        }
+
+        VkMemoryRequirements reqs{};
+        vkGetBufferMemoryRequirements(device_, particle_instance_buffers_[i], &reqs);
+        VkMemoryAllocateInfo ai{};
+        ai.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        ai.allocationSize  = reqs.size;
+        ai.memoryTypeIndex = find_memory_type(
+            reqs.memoryTypeBits,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        if (vkAllocateMemory(device_, &ai, nullptr, &particle_instance_memory_[i]) != VK_SUCCESS) {
+            kuma::log::error("Failed to allocate particle instance memory %u", i);
+            return false;
+        }
+        vkBindBufferMemory(device_, particle_instance_buffers_[i],
+                           particle_instance_memory_[i], 0);
+        if (vkMapMemory(device_, particle_instance_memory_[i], 0, size, 0,
+                        &particle_instance_mapped_[i]) != VK_SUCCESS) {
+            kuma::log::error("Failed to map particle instance memory %u", i);
+            return false;
+        }
+    }
+    return true;
+}
+
+void RendererImpl::destroy_particle_resources() {
+    for (uint32_t i = 0; i < particle_instance_buffers_.size(); ++i) {
+        if (particle_instance_mapped_[i] != nullptr) {
+            vkUnmapMemory(device_, particle_instance_memory_[i]);
+            particle_instance_mapped_[i] = nullptr;
+        }
+        if (particle_instance_buffers_[i] != VK_NULL_HANDLE) {
+            vkDestroyBuffer(device_, particle_instance_buffers_[i], nullptr);
+            particle_instance_buffers_[i] = VK_NULL_HANDLE;
+        }
+        if (particle_instance_memory_[i] != VK_NULL_HANDLE) {
+            vkFreeMemory(device_, particle_instance_memory_[i], nullptr);
+            particle_instance_memory_[i] = VK_NULL_HANDLE;
+        }
+    }
+    if (particle_quad_index_buffer_ != VK_NULL_HANDLE) {
+        vkDestroyBuffer(device_, particle_quad_index_buffer_, nullptr);
+        particle_quad_index_buffer_ = VK_NULL_HANDLE;
+    }
+    if (particle_quad_index_memory_ != VK_NULL_HANDLE) {
+        vkFreeMemory(device_, particle_quad_index_memory_, nullptr);
+        particle_quad_index_memory_ = VK_NULL_HANDLE;
+    }
+    if (particle_quad_vertex_buffer_ != VK_NULL_HANDLE) {
+        vkDestroyBuffer(device_, particle_quad_vertex_buffer_, nullptr);
+        particle_quad_vertex_buffer_ = VK_NULL_HANDLE;
+    }
+    if (particle_quad_vertex_memory_ != VK_NULL_HANDLE) {
+        vkFreeMemory(device_, particle_quad_vertex_memory_, nullptr);
+        particle_quad_vertex_memory_ = VK_NULL_HANDLE;
+    }
+}
+
 // ── Command Pool + Buffers ──────────────────────────────────────
 
 bool RendererImpl::create_command_pool() {

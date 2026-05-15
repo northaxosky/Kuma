@@ -93,6 +93,15 @@ void Renderer::draw() {
     impl_->draw();
 }
 
+uint32_t Renderer::upload_particle_instances(const void* instances, uint32_t count) {
+    return impl_->upload_particle_instances(instances, count);
+}
+
+void Renderer::draw_particles(uint32_t upload_offset, uint32_t count,
+                              const Mat4& view, const Mat4& view_projection) {
+    impl_->draw_particles(upload_offset, count, view, view_projection);
+}
+
 void* Renderer::gpu_context() {
     static GpuContext ctx = impl_->gpu_context();
     return &ctx;
@@ -140,6 +149,10 @@ bool RendererImpl::init(const RendererConfig& config) {
         return false;
     if (!create_material_descriptor_pool())
         return false;
+    if (!create_particle_quad())
+        return false;
+    if (!create_particle_instance_buffers())
+        return false;
 
     kuma::log::info("Vulkan renderer initialized");
     return true;
@@ -158,11 +171,13 @@ void RendererImpl::shutdown() {
 
     vkDestroyCommandPool(device_, command_pool_, nullptr);
 
+    destroy_particle_resources();
     destroy_material_resources();
 
     // Mesh and texture are owned by ResourceManager — not destroyed here.
 
     destroy_swapchain();
+    vkDestroyPipeline(device_, transparent_pipeline_, nullptr);
     vkDestroyPipeline(device_, debug_normal_pipeline_, nullptr);
     vkDestroyPipeline(device_, graphics_pipeline_, nullptr);
     vkDestroyPipelineLayout(device_, pipeline_layout_, nullptr);
@@ -202,6 +217,14 @@ bool RendererImpl::begin_frame() {
     }
 
     vkResetFences(device_, 1, &in_flight_fences_[current_frame_]);
+
+    // The fence we just waited on is the in-flight fence for this
+    // frame slot. After it signals, the GPU is finished reading
+    // ANY data scoped to this slot - including the particle instance
+    // ring buffer for this slot's index. Safe to reset the append
+    // cursor to zero here; particles::render appends from offset 0
+    // again this frame.
+    particle_instance_offset_ = 0;
 
     VkCommandBuffer cmd = command_buffers_[current_frame_];
     vkResetCommandBuffer(cmd, 0);
@@ -270,8 +293,12 @@ void RendererImpl::draw() {
 
     // Pick which pipeline this draw uses. set_pipeline() validates
     // the index; this just maps it to the corresponding VkPipeline.
-    VkPipeline pipeline =
-        active_pipeline_index_ == 1 ? debug_normal_pipeline_ : graphics_pipeline_;
+    VkPipeline pipeline;
+    switch (active_pipeline_index_) {
+    case 1:  pipeline = debug_normal_pipeline_; break;
+    case 2:  pipeline = transparent_pipeline_;  break;
+    default: pipeline = graphics_pipeline_;     break;
+    }
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 
     // Bind the active material's descriptor set (5 sampler bindings).
@@ -427,10 +454,84 @@ void RendererImpl::set_model_matrix(const Mat4& model) {
 }
 
 void RendererImpl::set_pipeline(uint32_t index) {
-    // 0 = textured (default), 1 = debug-normal viz. Out-of-range
-    // values clamp to 0 instead of asserting - draw() always has a
-    // sensible fallback.
-    active_pipeline_index_ = (index <= 1) ? index : 0;
+    // 0 = textured (default), 1 = debug-normal viz, 2 = particle
+    // (transparent). Out-of-range values clamp to 0 instead of
+    // asserting - draw() always has a sensible fallback.
+    active_pipeline_index_ = (index <= 2) ? index : 0;
+}
+
+uint32_t RendererImpl::upload_particle_instances(const void* instances, uint32_t count) {
+    if (!frame_recording_ || count == 0) return Renderer::kInvalidParticleUpload;
+
+    const uint32_t bytes = count * static_cast<uint32_t>(sizeof(ParticleInstance));
+    const uint32_t capacity_bytes =
+        kParticleRingCapacity * static_cast<uint32_t>(sizeof(ParticleInstance));
+    if (particle_instance_offset_ + bytes > capacity_bytes) {
+        kuma::log::warn("Particle instance ring buffer full (%u/%u bytes); skipping upload of %u instances",
+                        particle_instance_offset_, capacity_bytes, count);
+        return Renderer::kInvalidParticleUpload;
+    }
+
+    auto* dst = static_cast<std::uint8_t*>(particle_instance_mapped_[current_frame_])
+              + particle_instance_offset_;
+    std::memcpy(dst, instances, bytes);
+
+    const uint32_t offset = particle_instance_offset_;
+    particle_instance_offset_ += bytes;
+    return offset;
+}
+
+void RendererImpl::draw_particles(uint32_t upload_offset, uint32_t count,
+                                  const Mat4& view, const Mat4& view_projection) {
+    if (!frame_recording_ || count == 0
+        || upload_offset == Renderer::kInvalidParticleUpload
+        || transparent_pipeline_ == VK_NULL_HANDLE) {
+        return;
+    }
+
+    VkCommandBuffer cmd = command_buffers_[current_frame_];
+
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, transparent_pipeline_);
+    if (active_material_set_ != VK_NULL_HANDLE) {
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout_, 0, 1,
+                                &active_material_set_, 0, nullptr);
+    }
+
+    // Build the 96-byte push-constant payload: view-projection used
+    // by the vertex shader for the final clip-space transform, and
+    // camera right + up extracted from the view matrix's first two
+    // rows so the vertex shader can build the camera-facing quad
+    // without per-particle CPU rotation work.
+    //
+    // The view matrix transforms world->camera, so its rows are the
+    // camera basis vectors expressed in world space. Row 0 is camera
+    // right, row 1 is camera up.
+    struct PushPayload {
+        float view_projection[16];
+        float camera_right[4];
+        float camera_up[4];
+    };
+    PushPayload push{};
+    std::memcpy(push.view_projection, view_projection.ptr(), sizeof(push.view_projection));
+    push.camera_right[0] = view(0, 0);
+    push.camera_right[1] = view(0, 1);
+    push.camera_right[2] = view(0, 2);
+    push.camera_right[3] = 0.0f;
+    push.camera_up[0]    = view(1, 0);
+    push.camera_up[1]    = view(1, 1);
+    push.camera_up[2]    = view(1, 2);
+    push.camera_up[3]    = 0.0f;
+    vkCmdPushConstants(cmd, pipeline_layout_, VK_SHADER_STAGE_VERTEX_BIT, 0,
+                       sizeof(push), &push);
+
+    VkDeviceSize quad_offset     = 0;
+    VkDeviceSize instance_offset = upload_offset;
+    vkCmdBindVertexBuffers(cmd, 0, 1, &particle_quad_vertex_buffer_, &quad_offset);
+    vkCmdBindVertexBuffers(cmd, 1, 1, &particle_instance_buffers_[current_frame_],
+                           &instance_offset);
+    vkCmdBindIndexBuffer(cmd, particle_quad_index_buffer_, 0, VK_INDEX_TYPE_UINT16);
+
+    vkCmdDrawIndexed(cmd, 6 /* indices per quad */, count, 0, 0, 0);
 }
 
 }  // namespace kuma

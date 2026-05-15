@@ -63,6 +63,33 @@ struct Mesh {
     uint32_t index_count = 0;
 };
 
+// ── Particle vertex data ────────────────────────────────────────
+// Particle rendering uses two vertex bindings:
+//
+//   binding 0 = ParticleQuadVertex, per-vertex
+//     The four corners of a unit quad. Same 4 vertices for every
+//     particle ever drawn. The vertex shader extracts camera right
+//     and up from the view matrix and projects the corner into
+//     world space, so the actual quad position lives entirely in
+//     instance data.
+//
+//   binding 1 = ParticleInstance, per-instance
+//     One entry per particle: world position, size, color. The
+//     hardware advances the read cursor into binding 1 once per
+//     instance, so the same 4 vertices fan out to N quads in a
+//     single instanced draw call.
+struct ParticleQuadVertex {
+    float corner[2];   // (-0.5, -0.5), (0.5, -0.5), (-0.5, 0.5), (0.5, 0.5)
+};
+
+struct ParticleInstance {
+    float position[3];  // world position the particle's center sits at
+    float size;         // edge length in world units; vertex shader scales the corner by this
+    float color[4];     // RGBA - alpha drives the blend equation
+};
+static_assert(sizeof(ParticleInstance) == 32,
+              "ParticleInstance is part of the GPU vertex layout - size changes need a shader update");
+
 // ── GPU Context ─────────────────────────────────────────────────
 // The minimal set of Vulkan handles needed to create GPU resources.
 // Shared between the renderer and the resource manager.
@@ -121,6 +148,11 @@ public:
     void set_model_matrix(const Mat4& model);
     void draw();
 
+    // Particle path - see Renderer:: docs.
+    uint32_t upload_particle_instances(const void* instances, uint32_t count);
+    void     draw_particles(uint32_t upload_offset, uint32_t count,
+                            const Mat4& view, const Mat4& view_projection);
+
 private:
     // ── device.cpp ──────────────────────────────────────────────
     bool create_instance();
@@ -143,13 +175,17 @@ private:
 
     // ── pipeline.cpp ────────────────────────────────────────────
     bool create_graphics_pipelines();
-    VkPipeline build_pipeline(const char* vert_spv, const char* frag_spv);
+    VkPipeline build_pipeline(const char* vert_spv, const char* frag_spv,
+                              const struct PipelineCreateOptions& opts);
     VkShaderModule create_shader_module(const std::vector<char>& code) const;
 
     // ── resources.cpp ───────────────────────────────────────────
     bool create_default_textures();
     bool create_material_descriptor_pool();
     void destroy_material_resources();
+    bool create_particle_quad();
+    bool create_particle_instance_buffers();
+    void destroy_particle_resources();
     bool create_command_pool();
     bool create_command_buffers();
     bool create_sync_objects();
@@ -205,7 +241,26 @@ private:
     VkPipelineLayout pipeline_layout_ = VK_NULL_HANDLE;
     VkPipeline graphics_pipeline_ = VK_NULL_HANDLE;          // textured (pipeline 0)
     VkPipeline debug_normal_pipeline_ = VK_NULL_HANDLE;      // debug normal viz (pipeline 1)
+    VkPipeline transparent_pipeline_ = VK_NULL_HANDLE;       // particles (pipeline 2)
     uint32_t active_pipeline_index_ = 0;
+
+    // Particle rendering scratch:
+    //   quad vertex/index buffers - constant 4-vertex unit quad shared
+    //     by every particle draw, allocated once at renderer init.
+    //   instance ring buffer - per-frame-in-flight arena that emitter
+    //     uploads append into. Reset at the start of each begin_frame
+    //     once the corresponding fence is known complete, so any data
+    //     a previous frame's draw is still reading stays untouched.
+    VkBuffer       particle_quad_vertex_buffer_ = VK_NULL_HANDLE;
+    VkDeviceMemory particle_quad_vertex_memory_ = VK_NULL_HANDLE;
+    VkBuffer       particle_quad_index_buffer_  = VK_NULL_HANDLE;
+    VkDeviceMemory particle_quad_index_memory_  = VK_NULL_HANDLE;
+
+    static constexpr uint32_t kParticleRingCapacity = 64 * 256;  // 64 emitters * 256 particles
+    std::vector<VkBuffer>       particle_instance_buffers_;       // one per frame in flight
+    std::vector<VkDeviceMemory> particle_instance_memory_;
+    std::vector<void*>          particle_instance_mapped_;        // persistent host mapping
+    uint32_t                    particle_instance_offset_ = 0;    // bytes used in current frame
 
     // Resources (owned by ResourceManager, renderer borrows pointers)
     const Mesh* mesh_ = nullptr;
