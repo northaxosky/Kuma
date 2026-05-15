@@ -1,5 +1,7 @@
 #pragma once
 
+#include <kuma/math.h>
+
 #include <cstdint>
 
 namespace kuma {
@@ -32,19 +34,24 @@ enum class TextureUsage {
 // Most factor fields are unused by the current diffuse-only shader.
 // They exist on the runtime struct so a future lit shader can read
 // them without changing the load path or the .kmaterial format.
+//
+// This is a pure-CPU runtime struct - it is NOT directly copied to
+// the GPU, so it uses the engine's Vec3/Vec4 types instead of the
+// raw float arrays the on-disk KMaterialHeader has to stay locked
+// to.
 struct Material {
     void* descriptor_set = nullptr;        // opaque VkDescriptorSet
 
     uint32_t flags      = 0;               // see kMaterialFlag* in asset_format.h
     uint32_t alpha_mode = 0;               // see kAlphaMode* in asset_format.h
 
-    float base_color[4]      = {1.0f, 1.0f, 1.0f, 1.0f};
-    float alpha_cutoff       = 0.5f;
-    float metallic_factor    = 0.0f;
-    float roughness_factor   = 1.0f;
-    float normal_scale       = 1.0f;
+    Vec4 base_color         = {1.0f, 1.0f, 1.0f, 1.0f};
+    float alpha_cutoff      = 0.5f;
+    float metallic_factor   = 0.0f;
+    float roughness_factor  = 1.0f;
+    float normal_scale      = 1.0f;
     float occlusion_strength = 1.0f;
-    float emissive_factor[3] = {0.0f, 0.0f, 0.0f};
+    Vec3 emissive_factor    = {0.0f, 0.0f, 0.0f};
 };
 
 }  // namespace kuma

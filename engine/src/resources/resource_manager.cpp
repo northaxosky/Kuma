@@ -569,13 +569,20 @@ const Material* ResourceManager::Impl::load_material_binary(const char* path) {
     mat.descriptor_set     = descriptor_set;
     mat.flags              = hdr.flags;
     mat.alpha_mode         = hdr.alpha_mode;
-    std::memcpy(mat.base_color,      hdr.base_color,      sizeof(mat.base_color));
+    // Component-by-component assignment from the on-disk header's
+    // raw float arrays into the runtime Vec3/Vec4 fields. memcpy
+    // would also work but reads slightly clearer and is just as fast
+    // for these tiny copies.
+    mat.base_color         = Vec4{hdr.base_color[0], hdr.base_color[1],
+                                  hdr.base_color[2], hdr.base_color[3]};
     mat.alpha_cutoff       = hdr.alpha_cutoff;
     mat.metallic_factor    = hdr.metallic_factor;
     mat.roughness_factor   = hdr.roughness_factor;
     mat.normal_scale       = hdr.normal_scale;
     mat.occlusion_strength = hdr.occlusion_strength;
-    std::memcpy(mat.emissive_factor, hdr.emissive_factor, sizeof(mat.emissive_factor));
+    mat.emissive_factor    = Vec3{hdr.emissive_factor[0],
+                                  hdr.emissive_factor[1],
+                                  hdr.emissive_factor[2]};
 
     kuma::log::info("Material loaded: %s", path);
     auto [inserted, _] = material_cache_.emplace(path, mat);
