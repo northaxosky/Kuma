@@ -73,22 +73,16 @@ struct Mesh {
 //     world space, so the actual quad position lives entirely in
 //     instance data.
 //
-//   binding 1 = ParticleInstance, per-instance
-//     One entry per particle: world position, size, color. The
-//     hardware advances the read cursor into binding 1 once per
-//     instance, so the same 4 vertices fan out to N quads in a
-//     single instanced draw call.
+//   binding 1 = Renderer::ParticleInstance, per-instance
+//     Defined publicly in renderer.h since particles:: needs to
+//     build arrays of it. Layout MUST match the binding 1
+//     declaration in particle.vert byte-for-byte.
 struct ParticleQuadVertex {
     float corner[2];   // (-0.5, -0.5), (0.5, -0.5), (-0.5, 0.5), (0.5, 0.5)
 };
 
-struct ParticleInstance {
-    float position[3];  // world position the particle's center sits at
-    float size;         // edge length in world units; vertex shader scales the corner by this
-    float color[4];     // RGBA - alpha drives the blend equation
-};
-static_assert(sizeof(ParticleInstance) == 32,
-              "ParticleInstance is part of the GPU vertex layout - size changes need a shader update");
+static_assert(sizeof(Renderer::ParticleInstance) == 32,
+              "Renderer::ParticleInstance is part of the GPU vertex layout - size changes need a shader update");
 
 // ── GPU Context ─────────────────────────────────────────────────
 // The minimal set of Vulkan handles needed to create GPU resources.

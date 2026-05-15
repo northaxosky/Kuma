@@ -137,7 +137,7 @@ VkPipeline RendererImpl::build_pipeline(const char* vert_spv, const char* frag_s
         bindings[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
         bindings[1].binding   = 1;
-        bindings[1].stride    = sizeof(ParticleInstance);
+        bindings[1].stride    = sizeof(Renderer::ParticleInstance);
         bindings[1].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
 
         binding_count = 2;
@@ -150,17 +150,17 @@ VkPipeline RendererImpl::build_pipeline(const char* vert_spv, const char* frag_s
         attr_descs[1].binding  = 1;
         attr_descs[1].location = 1;
         attr_descs[1].format   = VK_FORMAT_R32G32B32_SFLOAT;
-        attr_descs[1].offset   = offsetof(ParticleInstance, position);
+        attr_descs[1].offset   = offsetof(Renderer::ParticleInstance, position);
 
         attr_descs[2].binding  = 1;
         attr_descs[2].location = 2;
         attr_descs[2].format   = VK_FORMAT_R32_SFLOAT;
-        attr_descs[2].offset   = offsetof(ParticleInstance, size);
+        attr_descs[2].offset   = offsetof(Renderer::ParticleInstance, size);
 
         attr_descs[3].binding  = 1;
         attr_descs[3].location = 3;
         attr_descs[3].format   = VK_FORMAT_R32G32B32A32_SFLOAT;
-        attr_descs[3].offset   = offsetof(ParticleInstance, color);
+        attr_descs[3].offset   = offsetof(Renderer::ParticleInstance, color);
 
         attr_count = 4;
     } else {

@@ -107,7 +107,8 @@ void simulate(Registry& registry, float dt);
 // Must run AFTER all opaque draws so the depth values opaque
 // geometry wrote are present when the particle pipeline (depth
 // test on, depth write off) does its visibility checks.
-void render(Registry& registry, const Mat4& view, const Mat4& view_projection);
+void render(Registry& registry, const Mat4& view, const Mat4& view_projection,
+            const Vec3& camera_position);
 
 // Default material the particle pipeline binds when an emitter's
 // `material` field is null. Backed by the renderer's 1x1 white

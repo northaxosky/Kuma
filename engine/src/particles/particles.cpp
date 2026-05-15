@@ -22,6 +22,7 @@
 #include <kuma/renderer.h>
 #include <kuma/transform.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <vector>
@@ -237,13 +238,143 @@ void simulate(Registry& registry, float dt) {
     }
 }
 
-void render(Registry& registry, const Mat4& view, const Mat4& view_projection) {
-    // The instance upload + draw flow ships in the next commit. For
-    // now the function exists so engine.cpp can wire it into the
-    // frame contract; calling it is a safe no-op.
-    (void)registry;
-    (void)view;
-    (void)view_projection;
+void render(Registry& registry, const Mat4& view, const Mat4& view_projection,
+            const Vec3& camera_position) {
+    if (g_state == nullptr) return;
+
+    Renderer& renderer = get_renderer();
+
+    // Collect every emitter with at least one alive particle. We
+    // need the entity (for material lookup), the transform (for
+    // back-to-front sort distance), and a stable handle into the
+    // ECS storage so the sort doesn't move the actual emitters.
+    struct EmitterDraw {
+        ParticleEmitter* emitter;
+        float            sort_distance;  // squared distance to camera
+    };
+    std::vector<EmitterDraw> draws;
+    for (auto [entity, transform, emitter]
+             : registry.view<Transform, ParticleEmitter>()) {
+        (void)entity;
+        if (emitter.alive_count == 0) continue;
+
+        const Vec3 to_emitter{
+            transform.position().x - camera_position.x,
+            transform.position().y - camera_position.y,
+            transform.position().z - camera_position.z,
+        };
+        EmitterDraw d{};
+        d.emitter       = &emitter;
+        d.sort_distance = to_emitter.x * to_emitter.x
+                        + to_emitter.y * to_emitter.y
+                        + to_emitter.z * to_emitter.z;
+        draws.push_back(d);
+    }
+    if (draws.empty()) return;
+
+    // Sort emitters back-to-front: largest distance first so closer
+    // emitters draw on top of further ones. For transparent passes
+    // this is what makes overlapping particle plumes blend correctly.
+    std::sort(draws.begin(), draws.end(),
+              [](const EmitterDraw& a, const EmitterDraw& b) {
+                  return a.sort_distance > b.sort_distance;
+              });
+
+    // Per-particle instance scratch reused across emitters. Fixed
+    // size = pool capacity; the index buffer below permutes which
+    // alive particle each instance row reads from.
+    std::vector<Renderer::ParticleInstance> instances;
+    instances.reserve(ParticleEmitter::kCapacity);
+
+    // Index buffer for the within-emitter sort. Indices are slot
+    // numbers into the SoA pool. Sort algorithms run over this
+    // little array, never touching the pool itself - matches
+    // Godot's CPUParticles3D approach.
+    std::vector<uint32_t> sort_indices;
+    sort_indices.reserve(ParticleEmitter::kCapacity);
+
+    for (const EmitterDraw& d : draws) {
+        ParticleEmitter& e = *d.emitter;
+
+        // Build the sort-index list of every alive slot.
+        sort_indices.clear();
+        for (uint32_t i = 0; i < ParticleEmitter::kCapacity; ++i) {
+            if (e.alive[i]) sort_indices.push_back(i);
+        }
+        if (sort_indices.empty()) continue;
+
+        // Sort within the emitter by draw_order.
+        switch (e.draw_order) {
+        case ParticleDrawOrder::Index:
+            // already in pool order; no work
+            break;
+        case ParticleDrawOrder::Lifetime: {
+            // Oldest (least remaining time) first so newer particles
+            // render on top.
+            const float* lifetimes = e.lifetimes;
+            std::sort(sort_indices.begin(), sort_indices.end(),
+                      [lifetimes](uint32_t a, uint32_t b) {
+                          return lifetimes[a] < lifetimes[b];
+                      });
+            break;
+        }
+        case ParticleDrawOrder::ViewDepth: {
+            // Back-to-front per camera distance. Same trick as the
+            // emitter-level sort but applied per-particle.
+            const Vec3* positions = e.positions;
+            const Vec3 cam = camera_position;
+            std::sort(sort_indices.begin(), sort_indices.end(),
+                      [positions, cam](uint32_t a, uint32_t b) {
+                          const Vec3 da{positions[a].x - cam.x,
+                                        positions[a].y - cam.y,
+                                        positions[a].z - cam.z};
+                          const Vec3 db{positions[b].x - cam.x,
+                                        positions[b].y - cam.y,
+                                        positions[b].z - cam.z};
+                          return (da.x*da.x + da.y*da.y + da.z*da.z)
+                               > (db.x*db.x + db.y*db.y + db.z*db.z);
+                      });
+            break;
+        }
+        }
+
+        // Build the instance array. Per-particle size and color are
+        // lerped from start->end based on age = 1 - life/start_life.
+        // age == 0 at spawn, 1 at death.
+        instances.clear();
+        instances.reserve(sort_indices.size());
+        for (uint32_t slot : sort_indices) {
+            const float age = (e.start_lifes[slot] > 0.0f)
+                                  ? (1.0f - e.lifetimes[slot] / e.start_lifes[slot])
+                                  : 1.0f;
+
+            Renderer::ParticleInstance inst{};
+            inst.position[0] = e.positions[slot].x;
+            inst.position[1] = e.positions[slot].y;
+            inst.position[2] = e.positions[slot].z;
+            inst.size        = e.size_start + (e.size_end - e.size_start) * age;
+            inst.color[0]    = e.color_start.x + (e.color_end.x - e.color_start.x) * age;
+            inst.color[1]    = e.color_start.y + (e.color_end.y - e.color_start.y) * age;
+            inst.color[2]    = e.color_start.z + (e.color_end.z - e.color_start.z) * age;
+            inst.color[3]    = e.color_start.w + (e.color_end.w - e.color_start.w) * age;
+            instances.push_back(inst);
+        }
+
+        const uint32_t count = static_cast<uint32_t>(instances.size());
+        const uint32_t offset = renderer.upload_particle_instances(instances.data(), count);
+        if (offset == Renderer::kInvalidParticleUpload) {
+            // Ring buffer exhausted for this frame - skip the rest of
+            // the emitters too, since they'll all hit the same wall
+            // and just spam log warnings.
+            break;
+        }
+
+        // Bind the emitter's material (or the default if it's null)
+        // and issue the instanced draw.
+        const Material* mat = (e.material != nullptr) ? e.material : default_material();
+        renderer.set_material(mat);
+        renderer.draw_particles(offset, count, view, view_projection);
+    }
 }
 
 EntityID spawn_burst(Registry& registry, const ParticleEmitter& preset, const Vec3& position) {

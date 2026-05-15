@@ -129,6 +129,17 @@ public:
     // The particles:: module hands per-frame instance data to the
     // renderer through these calls. Not for game code.
 
+    // Per-particle data the renderer expects in its instance ring
+    // buffer. Layout MUST match the binding 1 declaration in the
+    // particle vertex shader byte-for-byte. position is world space,
+    // size is the particle's edge length in world units, color is
+    // RGBA with alpha driving the blend.
+    struct ParticleInstance {
+        float position[3];
+        float size;
+        float color[4];
+    };
+
     // Append one emitter's worth of per-particle render state into
     // the current frame's instance ring buffer. instances points at
     // a tightly-packed array of ParticleInstance structures; count

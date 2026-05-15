@@ -228,6 +228,25 @@ int main() {
 
         if (kuma::input::was_key_pressed(kuma::Key::F) && spawned.size() < kMaxSpawned) {
             spawned.push_back(spawn_physics_icosahedron(registry, camera, thud_sound));
+
+            // Visible-proof particle spawn: a small burst of white
+            // sparks at the camera's aim point so we can see the new
+            // particle pipeline working. Replaced with the proper
+            // make_impact_spark() preset in a later commit.
+            kuma::ParticleEmitter spark{};
+            spark.lifetime     = 0.6f;
+            spark.burst_count  = 32;
+            spark.gravity      = {0.0f, -6.0f, 0.0f};
+            spark.velocity_min = {-2.0f, 1.0f, -2.0f};
+            spark.velocity_max = { 2.0f, 4.0f,  2.0f};
+            spark.size_start   = 0.08f;
+            spark.size_end     = 0.02f;
+            spark.color_start  = {1.0f, 1.0f, 1.0f, 1.0f};
+            spark.color_end    = {1.0f, 0.6f, 0.2f, 0.0f};
+
+            const kuma::Vec3 spawn_pos = camera.position()
+                                       + camera.forward() * 3.0f;
+            kuma::particles::spawn_burst(registry, spark, spawn_pos);
         }
 
         if (kuma::input::was_key_pressed(kuma::Key::R) && !spawned.empty()) {
@@ -241,6 +260,7 @@ int main() {
         const float dt = kuma::time::delta();
         kuma::character::simulate(dt, registry);
         kuma::physics::simulate(dt, registry);
+        kuma::particles::simulate(registry, dt);
 
         kuma::audio::set_listener_pose(camera.position(),
                                         camera.forward(),
@@ -326,6 +346,16 @@ int main() {
 
             kuma::get_renderer().set_pipeline(0);
         }
+
+        // ── Render particles (transparent pipeline) ──────────────
+        // Must run AFTER all opaque draws above so the depth values
+        // they wrote are present when the particle pipeline does
+        // its depth test (which still rejects fragments behind
+        // walls, even though particles don't WRITE depth).
+        kuma::particles::render(registry,
+                                camera.view(),
+                                camera.view_projection(),
+                                camera.position());
 
         const uint64_t frame = kuma::time::frame_count();
         if (frame > 1 && frame % 60 == 0) {

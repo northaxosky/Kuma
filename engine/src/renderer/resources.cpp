@@ -423,7 +423,7 @@ bool RendererImpl::create_particle_instance_buffers() {
     // and stays mapped for the renderer's lifetime so per-frame
     // appends are a plain memcpy with no map/unmap churn.
     const VkDeviceSize size = static_cast<VkDeviceSize>(kParticleRingCapacity)
-                            * sizeof(ParticleInstance);
+                            * sizeof(Renderer::ParticleInstance);
 
     particle_instance_buffers_.resize(MAX_FRAMES_IN_FLIGHT, VK_NULL_HANDLE);
     particle_instance_memory_.resize(MAX_FRAMES_IN_FLIGHT, VK_NULL_HANDLE);

@@ -463,9 +463,9 @@ void RendererImpl::set_pipeline(uint32_t index) {
 uint32_t RendererImpl::upload_particle_instances(const void* instances, uint32_t count) {
     if (!frame_recording_ || count == 0) return Renderer::kInvalidParticleUpload;
 
-    const uint32_t bytes = count * static_cast<uint32_t>(sizeof(ParticleInstance));
+    const uint32_t bytes = count * static_cast<uint32_t>(sizeof(Renderer::ParticleInstance));
     const uint32_t capacity_bytes =
-        kParticleRingCapacity * static_cast<uint32_t>(sizeof(ParticleInstance));
+        kParticleRingCapacity * static_cast<uint32_t>(sizeof(Renderer::ParticleInstance));
     if (particle_instance_offset_ + bytes > capacity_bytes) {
         kuma::log::warn("Particle instance ring buffer full (%u/%u bytes); skipping upload of %u instances",
                         particle_instance_offset_, capacity_bytes, count);
