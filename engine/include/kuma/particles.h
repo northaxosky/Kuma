@@ -65,11 +65,8 @@ struct ParticleEmitter {
     Vec3  velocity_max = { 1.0f, 3.0f,  1.0f};   // inside this AABB
     float size_start   = 0.10f;
     float size_end     = 0.02f;
-    // RGBA colors expressed as plain float[4] - kuma::math doesn't
-    // (yet) ship a Vec4 and the shader-side struct expects four
-    // tightly packed floats anyway.
-    float color_start[4] = {1.0f, 1.0f, 1.0f, 1.0f};
-    float color_end  [4] = {1.0f, 1.0f, 1.0f, 0.0f};
+    Vec4  color_start  = {1.0f, 1.0f, 1.0f, 1.0f};   // RGBA at spawn
+    Vec4  color_end    = {1.0f, 1.0f, 1.0f, 0.0f};   // RGBA at death
 
     // ── render config ───────────────────────────────────────────
     const Material*  material   = nullptr;                  // null -> particles::default_material()

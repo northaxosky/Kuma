@@ -72,6 +72,57 @@ inline Vec3 normalize(const Vec3& v) {
     return v * (1.0f / len);
 }
 
+// ── Vec4 ────────────────────────────────────────────────────────
+// 4-component float vector. Used wherever something needs a fourth
+// channel: RGBA colors, packed (xyz + scalar) light data, plane
+// equations, anything pushed across the GPU push-constant boundary
+// where a 16-byte alignment requires a four-float type. No cross
+// product is provided - it's only meaningful in 3D.
+
+struct Vec4 {
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+    float w = 0.0f;
+
+    Vec4() = default;
+    Vec4(float x, float y, float z, float w) : x(x), y(y), z(z), w(w) {}
+    Vec4(const Vec3& xyz, float w) : x(xyz.x), y(xyz.y), z(xyz.z), w(w) {}
+
+    Vec4 operator+(const Vec4& other) const {
+        return {x + other.x, y + other.y, z + other.z, w + other.w};
+    }
+    Vec4 operator-(const Vec4& other) const {
+        return {x - other.x, y - other.y, z - other.z, w - other.w};
+    }
+    Vec4 operator*(float scalar) const {
+        return {x * scalar, y * scalar, z * scalar, w * scalar};
+    }
+
+    Vec4& operator+=(const Vec4& other) {
+        x += other.x;
+        y += other.y;
+        z += other.z;
+        w += other.w;
+        return *this;
+    }
+};
+
+// Dot product. Same intuition as Vec3's: zero when orthogonal,
+// equals |a|*|b| when parallel.
+inline float dot(const Vec4& a, const Vec4& b) {
+    return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
+}
+
+// Normalize: scale to length 1. Returns the zero vector for a
+// zero input rather than producing NaN, mirroring Vec3::normalize.
+inline Vec4 normalize(const Vec4& v) {
+    float len = std::sqrt(dot(v, v));
+    if (len == 0.0f)
+        return {0.0f, 0.0f, 0.0f, 0.0f};
+    return v * (1.0f / len);
+}
+
 // ── Mat4 ────────────────────────────────────────────────────────
 // 4x4 matrix stored in column-major order (same as Vulkan/OpenGL).
 //

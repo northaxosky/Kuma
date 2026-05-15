@@ -15,6 +15,7 @@
 using kuma::Mat4;
 using kuma::Vec2;
 using kuma::Vec3;
+using kuma::Vec4;
 
 namespace {
 
@@ -246,6 +247,98 @@ TEST(Vec2, AddProducesComponentSum) {
     Vec2 r = Vec2(1.0f, 2.0f) + Vec2(10.0f, 20.0f);
     EXPECT_FLOAT_EQ(r.x, 11.0f);
     EXPECT_FLOAT_EQ(r.y, 22.0f);
+}
+
+// ── Vec4 ────────────────────────────────────────────────────────────
+
+TEST(Vec4, DefaultConstructsToZero) {
+    Vec4 v;
+    EXPECT_FLOAT_EQ(v.x, 0.0f);
+    EXPECT_FLOAT_EQ(v.y, 0.0f);
+    EXPECT_FLOAT_EQ(v.z, 0.0f);
+    EXPECT_FLOAT_EQ(v.w, 0.0f);
+}
+
+TEST(Vec4, ComponentConstructAssignsInOrder) {
+    Vec4 v{1.0f, 2.0f, 3.0f, 4.0f};
+    EXPECT_FLOAT_EQ(v.x, 1.0f);
+    EXPECT_FLOAT_EQ(v.y, 2.0f);
+    EXPECT_FLOAT_EQ(v.z, 3.0f);
+    EXPECT_FLOAT_EQ(v.w, 4.0f);
+}
+
+TEST(Vec4, ConstructFromVec3AndScalarPreservesAllComponents) {
+    Vec4 v{Vec3{1.0f, 2.0f, 3.0f}, 4.0f};
+    EXPECT_FLOAT_EQ(v.x, 1.0f);
+    EXPECT_FLOAT_EQ(v.y, 2.0f);
+    EXPECT_FLOAT_EQ(v.z, 3.0f);
+    EXPECT_FLOAT_EQ(v.w, 4.0f);
+}
+
+TEST(Vec4, AdditionIsComponentwise) {
+    Vec4 r = Vec4{1, 2, 3, 4} + Vec4{10, 20, 30, 40};
+    EXPECT_FLOAT_EQ(r.x, 11.0f);
+    EXPECT_FLOAT_EQ(r.y, 22.0f);
+    EXPECT_FLOAT_EQ(r.z, 33.0f);
+    EXPECT_FLOAT_EQ(r.w, 44.0f);
+}
+
+TEST(Vec4, SubtractionIsComponentwise) {
+    Vec4 r = Vec4{10, 20, 30, 40} - Vec4{1, 2, 3, 4};
+    EXPECT_FLOAT_EQ(r.x, 9.0f);
+    EXPECT_FLOAT_EQ(r.y, 18.0f);
+    EXPECT_FLOAT_EQ(r.z, 27.0f);
+    EXPECT_FLOAT_EQ(r.w, 36.0f);
+}
+
+TEST(Vec4, ScalarMultiplyScalesAllFour) {
+    // The fourth component is what makes Vec4 different from Vec3 -
+    // pin a test that exercises it specifically so a "forgot to scale w"
+    // bug surfaces immediately.
+    Vec4 r = Vec4{1, 2, 3, 4} * 2.5f;
+    EXPECT_FLOAT_EQ(r.x, 2.5f);
+    EXPECT_FLOAT_EQ(r.y, 5.0f);
+    EXPECT_FLOAT_EQ(r.z, 7.5f);
+    EXPECT_FLOAT_EQ(r.w, 10.0f);
+}
+
+TEST(Vec4, PlusEqualsAccumulatesAllFour) {
+    Vec4 acc{0, 0, 0, 0};
+    acc += Vec4{1, 2, 3, 4};
+    acc += Vec4{-1, 4, 0, 5};
+    EXPECT_FLOAT_EQ(acc.x, 0.0f);
+    EXPECT_FLOAT_EQ(acc.y, 6.0f);
+    EXPECT_FLOAT_EQ(acc.z, 3.0f);
+    EXPECT_FLOAT_EQ(acc.w, 9.0f);
+}
+
+TEST(Vec4, DotIncludesFourthComponent) {
+    // dot((1,0,0,2), (0,1,0,3)) = 0 + 0 + 0 + 6 = 6.
+    // If w were dropped (treating Vec4 as Vec3 + ignored padding),
+    // the result would be 0 - this catches that bug.
+    EXPECT_FLOAT_EQ(kuma::dot(Vec4{1, 0, 0, 2}, Vec4{0, 1, 0, 3}), 6.0f);
+}
+
+TEST(Vec4, DotOfSelfEqualsSquaredLength) {
+    // For v = (1, 2, 2, 4), |v|^2 = 1 + 4 + 4 + 16 = 25.
+    EXPECT_FLOAT_EQ(kuma::dot(Vec4{1, 2, 2, 4}, Vec4{1, 2, 2, 4}), 25.0f);
+}
+
+TEST(Vec4, NormalizeProducesUnitLength) {
+    // v = (1, 2, 2, 4) has length sqrt(25) = 5.
+    Vec4 n = kuma::normalize(Vec4{1, 2, 2, 4});
+    EXPECT_NEAR(std::sqrt(kuma::dot(n, n)), 1.0f, kEps);
+    EXPECT_NEAR(n.x, 0.2f, kEps);
+    EXPECT_NEAR(n.w, 0.8f, kEps);
+}
+
+TEST(Vec4, NormalizeZeroVectorIsSafe) {
+    // Mirrors Vec3::normalize - division by zero would be a crash.
+    Vec4 n = kuma::normalize(Vec4{0, 0, 0, 0});
+    EXPECT_FLOAT_EQ(n.x, 0.0f);
+    EXPECT_FLOAT_EQ(n.y, 0.0f);
+    EXPECT_FLOAT_EQ(n.z, 0.0f);
+    EXPECT_FLOAT_EQ(n.w, 0.0f);
 }
 
 TEST(Vec2, SubtractProducesComponentDifference) {
