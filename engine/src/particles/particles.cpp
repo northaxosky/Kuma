@@ -169,10 +169,16 @@ void simulate(Registry& registry, float dt) {
                 while (emitter.spawn_accumulator >= 1.0f) {
                     const int slot = find_dead_slot(emitter);
                     if (slot < 0) {
-                        // pool full - drop the spawn rather than
-                        // recycle (recycling produces a visible
-                        // "all the oldest particles vanish" pop)
-                        emitter.spawn_accumulator = 0.0f;
+                        // Pool full - clamp the accumulator instead
+                        // of zeroing it. Zeroing would permanently
+                        // lose the fractional spawn credit and drift
+                        // the spawn rate; leaving it unbounded would
+                        // flood the pool the moment a slot opens up.
+                        // Clamping to 1.0 means "we owe at most one
+                        // particle next frame", which is correct.
+                        if (emitter.spawn_accumulator > 1.0f) {
+                            emitter.spawn_accumulator = 1.0f;
+                        }
                         break;
                     }
                     spawn_into_slot(emitter, static_cast<uint32_t>(slot),
@@ -375,6 +381,14 @@ void render(Registry& registry, const Mat4& view, const Mat4& view_projection,
         renderer.set_material(mat);
         renderer.draw_particles(offset, count, view, view_projection);
     }
+
+    // Clear the active material binding so subsequent renderer.draw()
+    // calls (debug overlay, etc) don't accidentally inherit whatever
+    // particle material we last bound. The sandbox happens to
+    // set_material before every mesh draw and is unaffected, but this
+    // makes the contract explicit: particles::render leaves no
+    // material bound on exit.
+    renderer.set_material(nullptr);
 }
 
 EntityID spawn_burst(Registry& registry, const ParticleEmitter& preset, const Vec3& position) {
