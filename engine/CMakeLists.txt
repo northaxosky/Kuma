@@ -19,6 +19,7 @@ target_sources(kuma-engine PRIVATE
     src/character/fps_camera.cpp
     src/audio/audio.cpp
     src/particles/particles.cpp
+    src/particles/presets.cpp
     src/scene/scene.cpp
     src/platform/input.cpp
     src/platform/paths.cpp
