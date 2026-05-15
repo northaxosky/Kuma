@@ -229,24 +229,27 @@ int main() {
         if (kuma::input::was_key_pressed(kuma::Key::F) && spawned.size() < kMaxSpawned) {
             spawned.push_back(spawn_physics_icosahedron(registry, camera, thud_sound));
 
-            // Visible-proof particle spawn: a small burst of white
-            // sparks at the camera's aim point so we can see the new
-            // particle pipeline working. Replaced with the proper
-            // make_impact_spark() preset in a later commit.
-            kuma::ParticleEmitter spark{};
-            spark.lifetime     = 0.6f;
-            spark.burst_count  = 32;
-            spark.gravity      = {0.0f, -6.0f, 0.0f};
-            spark.velocity_min = {-2.0f, 1.0f, -2.0f};
-            spark.velocity_max = { 2.0f, 4.0f,  2.0f};
-            spark.size_start   = 0.08f;
-            spark.size_end     = 0.02f;
-            spark.color_start  = {1.0f, 1.0f, 1.0f, 1.0f};
-            spark.color_end    = {1.0f, 0.6f, 0.2f, 0.0f};
+            // Impact-spark feedback at the spawn point. spawn_burst
+            // creates the entity, attaches a Transform + emitter, and
+            // fires the burst into the pool the same frame so the
+            // particles are visible immediately - no one-frame lag.
+            const kuma::Vec3 impact_pos = camera.position()
+                                        + camera.forward() * 3.0f;
+            kuma::particles::spawn_burst(registry, kuma::make_impact_spark(),
+                                         impact_pos);
+        }
 
-            const kuma::Vec3 spawn_pos = camera.position()
-                                       + camera.forward() * 3.0f;
-            kuma::particles::spawn_burst(registry, spark, spawn_pos);
+        // Mouse-1: muzzle-flash burst at the camera origin pointed
+        // along the camera's forward. The flash is short enough that
+        // rapid clicks build readable repeated pops rather than
+        // smearing into a continuous blob. In FPS mode only - in Fly
+        // mode mouse-1 isn't bound to anything.
+        if (mode == CameraMode::Fps
+            && kuma::input::was_mouse_button_pressed(kuma::MouseButton::Left)) {
+            const kuma::Vec3 muzzle_pos = camera.position()
+                                        + camera.forward() * 0.6f;
+            kuma::particles::spawn_burst(registry, kuma::make_muzzle_flash(),
+                                         muzzle_pos);
         }
 
         if (kuma::input::was_key_pressed(kuma::Key::R) && !spawned.empty()) {
